@@ -1,0 +1,14 @@
+{
+  "name": "smart_bp_tools",
+  "private": true,
+  "scripts": {
+    "scrape:px-images": "node scripts/scrape_px_images.js",
+    "shop:image-hunt-html": "node scripts/gen_image_search_helper.mjs",
+    "shop:fetch-ddg-images": "node scripts/fetch_ddg_images.mjs",
+    "shop:image-proxy": "node scripts/image_proxy_server.mjs",
+    "shop:px-search-thumb": "node scripts/px_search_thumb_server.mjs"
+  },
+  "dependencies": {
+    "playwright": "latest"
+  }
+}
