@@ -1,4 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 健康處方籤 OCR 需使用相機 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- 本機提醒（吃藥時間 / 領藥日）需要的權限 -->
+    <!-- Android 13 (API 33) 之後使用通知前必須先取得使用者同意 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 重新開機後讓系統重新排程已存在的提醒，避免重啟手機後不會叮咚 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 通知音/震動以及鎖定螢幕也能收到提醒 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <application
         android:label="smart_bp"
         android:name="${applicationName}"
@@ -30,6 +42,10 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- ML Kit 繁體中文文字辨識模型：於安裝時自動下載，免首次使用等待 -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr_chinese" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

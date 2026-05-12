@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'; // 👈 1. 引入 Supabase 套件
 
+import 'core/notification_service.dart';
 import 'core/router.dart';
 
 // 👈 2. main 函式必須加上 async，因為連線到雲端需要等待
@@ -15,6 +16,10 @@ void main() async {
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50dWZod3F4YWlkd25lbG9yY3N2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyMTc3NDIsImV4cCI6MjA5MDc5Mzc0Mn0.huSbIe7lqoUY-KTNgBl6ahMy8Px-6CS7s28gkQeJTaI',      // ⚠️ 注意：這裡要換成你 Supabase 後台的 anon key
   );
 
+  // 👈 4. 初始化本機通知服務（載入時區資料、註冊 channel）
+  // 不阻擋啟動：即使初始化失敗，App 主流程仍可運作。
+  await NotificationService.instance.init();
+
   runApp(
     // ProviderScope 是 Riverpod 的核心，它負責存放應用程式所有的「狀態」
     // 沒有這層封裝，後續我們寫的功能模組就無法共享資料
@@ -24,8 +29,22 @@ void main() async {
   );
 }
 
-class MinduApp extends StatelessWidget {
+class MinduApp extends StatefulWidget {
   const MinduApp({super.key});
+
+  @override
+  State<MinduApp> createState() => _MinduAppState();
+}
+
+class _MinduAppState extends State<MinduApp> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      NotificationService.instance.bindNavigate(appRouter.go);
+      await NotificationService.instance.handleLaunchNotificationIfAny();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
