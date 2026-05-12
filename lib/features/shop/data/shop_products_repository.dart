@@ -10,11 +10,16 @@ import 'package:smart_bp/features/shop/domain/shop_product.dart';
 /// `/product/{id}` 對應的 `product_id` 自動覆寫 [ShopProduct.imageUrl]，無須手動貼連結。
 class ShopProductsRepository {
   static const String _scrapedImagesAsset = 'lib/features/shop/data/product_images.json';
+  static const String _thumbApiBaseEnv = String.fromEnvironment('PX_SEARCH_THUMB_API');
 
   Future<List<ShopProduct>> load() async {
     final products = shopSeedJson.trim().isNotEmpty
         ? ShopProduct.listFromJsonString(shopSeedJson)
         : ShopProduct.listFromCometText(shopSeedCometText);
+    // 需求：全部走「圖搜全聯」縮圖時，不要再混用爬蟲圖覆寫（避免撞圖/占位圖）。
+    // 預設會走 `shop_page.dart` 的縮圖 API；若有顯式設定 API base，直接跳過覆寫。
+    if (_thumbApiBaseEnv.trim().isNotEmpty) return products;
+
     final overrides = await _loadPxScrapedImageOverrides();
     if (overrides.isEmpty) return products;
     return products.map((p) => _applyScrapedImage(p, overrides)).toList();

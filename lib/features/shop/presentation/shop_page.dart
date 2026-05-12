@@ -2,10 +2,14 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
+import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/shop/data/image_proxy.dart';
 import 'package:smart_bp/features/shop/data/px_search_thumb_client.dart';
 import 'package:smart_bp/features/shop/domain/shop_product.dart';
+import 'package:smart_bp/features/shop/presentation/shop_orders_provider.dart';
 import 'package:smart_bp/features/shop/presentation/shop_products_provider.dart';
+import 'package:smart_bp/shared/widgets/mindu_loading_overlay.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ShopPage extends ConsumerWidget {
@@ -45,7 +49,7 @@ class ShopPage extends ConsumerWidget {
   }
 }
 
-class _ShopOrderView extends StatefulWidget {
+class _ShopOrderView extends ConsumerStatefulWidget {
   const _ShopOrderView({
     required this.products,
     required this.colorScheme,
@@ -57,15 +61,18 @@ class _ShopOrderView extends StatefulWidget {
   final Color accent;
 
   @override
-  State<_ShopOrderView> createState() => _ShopOrderViewState();
+  ConsumerState<_ShopOrderView> createState() => _ShopOrderViewState();
 }
 
-class _ShopOrderViewState extends State<_ShopOrderView> {
+class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
   late final Map<String, int> _quantities;
   final _searchController = TextEditingController();
   String _search = '';
   String _selectedCategory = '全部';
-  int _visibleCount = 24;
+  static const int _pageSize = 48;
+  int _pageIndex = 0;
+  bool _showAll = false;
+  bool _submitting = false;
 
   @override
   void initState() {
@@ -95,14 +102,49 @@ class _ShopOrderViewState extends State<_ShopOrderView> {
     return total;
   }
 
-  void _submitOrder() {
+  Future<void> _submitOrder() async {
     if (_totalCount == 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先選擇至少一項商品數量')));
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已建立訂購單（示範）：$_totalCount 項，合計 NT\$${_totalAmount.toStringAsFixed(0)}')),
-    );
+
+    final session = ref.read(authProvider);
+    final user = session?.user;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先登入再送出需求')));
+      return;
+    }
+
+    setState(() => _submitting = true);
+    try {
+      final repo = ref.read(shopOrdersRepositoryProvider);
+      final orderId = await repo.createOrder(
+        userId: user.id,
+        products: widget.products,
+        quantitiesByProductId: _quantities,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已送出需求單：$orderId（待志工確認）')),
+      );
+      setState(() {
+        for (final k in _quantities.keys) {
+          _quantities[k] = 0;
+        }
+      });
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('送出失敗：${e.message}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('送出失敗：$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   @override
@@ -114,19 +156,33 @@ class _ShopOrderViewState extends State<_ShopOrderView> {
       final byCategory = _selectedCategory == '全部' || p.category == _selectedCategory;
       return byKeyword && byCategory;
     }).toList();
-    final visible = filtered.take(_visibleCount).toList();
+    final totalPages = (filtered.length / _pageSize).ceil().clamp(1, 1 << 30);
+    final clampedPageIndex = _pageIndex.clamp(0, totalPages - 1);
+    if (clampedPageIndex != _pageIndex) {
+      // 避免搜尋／分類切換後頁碼超出範圍
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() => _pageIndex = clampedPageIndex);
+      });
+    }
+    final visible = _showAll
+        ? filtered
+        : filtered.skip(clampedPageIndex * _pageSize).take(_pageSize).toList();
 
-    return Column(
-      children: [
-        Expanded(
-          child: ListView(
+    return MinduLoadingOverlay(
+      isLoading: _submitting,
+      message: '送出需求中，請稍候...',
+      child: Column(
+        children: [
+          Expanded(
+            child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
               TextField(
                 controller: _searchController,
                 onChanged: (value) => setState(() {
                   _search = value;
-                  _visibleCount = 24;
+                  _pageIndex = 0;
                 }),
                 decoration: InputDecoration(
                   hintText: '搜尋商品名稱或規格',
@@ -144,7 +200,7 @@ class _ShopOrderViewState extends State<_ShopOrderView> {
                       selected: _selectedCategory == '全部',
                       onTap: () => setState(() {
                         _selectedCategory = '全部';
-                        _visibleCount = 24;
+                        _pageIndex = 0;
                       }),
                     ),
                     for (final category in categories)
@@ -153,14 +209,37 @@ class _ShopOrderViewState extends State<_ShopOrderView> {
                         selected: _selectedCategory == category,
                         onTap: () => setState(() {
                           _selectedCategory = category;
-                          _visibleCount = 24;
+                          _pageIndex = 0;
                         }),
                       ),
                   ],
                 ),
               ),
               const SizedBox(height: 8),
-              Text('共 ${filtered.length} 件商品', style: TextStyle(color: widget.colorScheme.onSurfaceVariant)),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '共 ${filtered.length} 件商品',
+                      style: TextStyle(color: widget.colorScheme.onSurfaceVariant),
+                    ),
+                  ),
+                  Text(
+                    _showAll
+                        ? '全部顯示'
+                        : '第 ${clampedPageIndex + 1} / $totalPages 頁（每頁 $_pageSize）',
+                    style: TextStyle(color: widget.colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: () => setState(() {
+                      _showAll = !_showAll;
+                      _pageIndex = 0;
+                    }),
+                    child: Text(_showAll ? '改分頁' : '全部顯示'),
+                  ),
+                ],
+              ),
               const SizedBox(height: 8),
               LayoutBuilder(
                 builder: (context, constraints) {
@@ -190,6 +269,7 @@ class _ShopOrderViewState extends State<_ShopOrderView> {
                     itemBuilder: (context, index) {
                       final p = visible[index];
                       return _ProductCard(
+                        key: ValueKey<String>(p.id),
                         product: p,
                         accent: widget.accent,
                         quantity: _quantities[p.id] ?? 0,
@@ -200,29 +280,46 @@ class _ShopOrderViewState extends State<_ShopOrderView> {
                   );
                 },
               ),
-              if (filtered.length > visible.length)
-                Center(
-                  child: OutlinedButton(
-                    onPressed: () => setState(() => _visibleCount += 24),
-                    child: Text('載入更多 (${filtered.length - visible.length} 筆)'),
+              if (!_showAll && filtered.length > _pageSize)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        tooltip: '上一頁',
+                        onPressed: clampedPageIndex <= 0 ? null : () => setState(() => _pageIndex -= 1),
+                        icon: const Icon(Icons.chevron_left),
+                      ),
+                      Text('第 ${clampedPageIndex + 1} / $totalPages 頁'),
+                      IconButton(
+                        tooltip: '下一頁',
+                        onPressed: clampedPageIndex >= totalPages - 1 ? null : () => setState(() => _pageIndex += 1),
+                        icon: const Icon(Icons.chevron_right),
+                      ),
+                    ],
                   ),
                 ),
             ],
           ),
         ),
-        SafeArea(
-          top: false,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-            child: Row(
-              children: [
-                Expanded(child: Text('$_totalCount 項\nNT\$${_totalAmount.toStringAsFixed(0)}')),
-                FilledButton(onPressed: _submitOrder, child: const Text('送出訂購')),
-              ],
+          SafeArea(
+            top: false,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              child: Row(
+                children: [
+                  Expanded(child: Text('$_totalCount 項\nNT\$${_totalAmount.toStringAsFixed(0)}')),
+                  FilledButton(
+                    onPressed: _submitting ? null : _submitOrder,
+                    child: const Text('送出需求'),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -243,6 +340,7 @@ class _CategoryChip extends StatelessWidget {
 
 class _ProductCard extends StatelessWidget {
   const _ProductCard({
+    super.key,
     required this.product,
     required this.accent,
     required this.quantity,
@@ -435,14 +533,37 @@ class _ShopProductImage extends StatefulWidget {
 class _ShopProductImageState extends State<_ShopProductImage> {
   static const Color _photoBg = Color(0xFFF8F8F8);
 
-  static String get _thumbApiBase => const String.fromEnvironment('PX_SEARCH_THUMB_API');
+  /// 圖搜全聯縮圖 API。
+  ///
+  /// - 可用 `--dart-define=PX_SEARCH_THUMB_API=...` 覆寫（Android 模擬器通常是 `http://10.0.2.2:8790`）
+  /// - 未設定時預設用本機 node 服務（`npm run shop:px-search-thumb`）
+  static String get _thumbApiBase {
+    final fromEnv = const String.fromEnvironment('PX_SEARCH_THUMB_API').trim();
+    if (fromEnv.isNotEmpty) return fromEnv;
+    return 'http://127.0.0.1:8790';
+  }
 
-  bool get _preferPxThumb => _thumbApiBase.isNotEmpty;
+  bool get _preferPxThumb => true;
 
   String? _url;
   bool _loadingPx = false;
+  int _pxRetryCount = 0;
   /// 未開「僅全聯」模式時，是否已因種子破圖而改打全聯。
   bool _pxFetchStarted = false;
+
+  void _schedulePxRetryIfNeeded() {
+    if (!_preferPxThumb || !mounted) return;
+    if (_loadingPx) return;
+    if (_url != null && _url!.isNotEmpty) return;
+    if (_pxRetryCount >= 3) return;
+    _pxRetryCount += 1;
+    final delayMs = 1200 * _pxRetryCount;
+    Future<void>.delayed(Duration(milliseconds: delayMs), () {
+      if (!mounted) return;
+      if (_url != null && _url!.isNotEmpty) return;
+      _loadPxThumbFirst();
+    });
+  }
 
   @override
   void initState() {
@@ -467,6 +588,7 @@ class _ShopProductImageState extends State<_ShopProductImage> {
       apiBase: _thumbApiBase,
       keyword: widget.product.pxMartImageSearchKeyword,
       pxProductId: widget.product.productId ?? ShopProduct.parsePxProductId(widget.product.sourceUrl),
+      cacheKey: widget.product.id,
     );
     if (!mounted) return;
     setState(() {
@@ -477,6 +599,7 @@ class _ShopProductImageState extends State<_ShopProductImage> {
         _url = null;
       }
     });
+    if (u == null || u.isEmpty) _schedulePxRetryIfNeeded();
   }
 
   Future<void> _loadPxThumbAfterSeedFailed() async {
@@ -491,6 +614,7 @@ class _ShopProductImageState extends State<_ShopProductImage> {
       apiBase: _thumbApiBase,
       keyword: widget.product.pxMartImageSearchKeyword,
       pxProductId: widget.product.productId ?? ShopProduct.parsePxProductId(widget.product.sourceUrl),
+      cacheKey: widget.product.id,
     );
     if (!mounted) return;
     setState(() {
@@ -501,11 +625,23 @@ class _ShopProductImageState extends State<_ShopProductImage> {
     });
   }
 
+  @override
+  void didUpdateWidget(covariant _ShopProductImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.product.id == widget.product.id) return;
+    _url = null;
+    _loadingPx = false;
+    _pxRetryCount = 0;
+    _pxFetchStarted = true;
+    _loadPxThumbFirst();
+  }
+
   void _onNetworkImageError() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_preferPxThumb) {
         setState(() => _url = null);
+        _schedulePxRetryIfNeeded();
         return;
       }
       _loadPxThumbAfterSeedFailed();

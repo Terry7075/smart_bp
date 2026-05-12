@@ -37,8 +37,18 @@ function runQueued(task) {
 }
 
 async function ensureBrowser() {
+  // Playwright 的 browser 可能因為暫時性錯誤被關閉；此時要自動重開，
+  // 否則後續請求會一直回 "Target page, context or browser has been closed"。
+  if (browser) {
+    try {
+      if (!browser.isConnected()) browser = null;
+    } catch {
+      browser = null;
+    }
+  }
   if (!browser) {
-    browser = await chromium.launch({ headless: true });
+    // 用本機已安裝的 Chrome，避免 Playwright browser binaries 缺失／架構不符造成無圖。
+    browser = await chromium.launch({ headless: true, channel: 'chrome' });
   }
   return browser;
 }
