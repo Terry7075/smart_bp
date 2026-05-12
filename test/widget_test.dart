@@ -7,24 +7,15 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:smart_bp/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
-
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('App boots smoke test', (WidgetTester tester) async {
+    // 只驗證 widget tree 能啟動；避免依賴舊的 counter 範本與 Supabase 初始化。
+    await tester.pumpWidget(const ProviderScope(child: MinduApp()));
+    await tester.pumpAndSettle();
+    expect(find.byType(MaterialApp), findsOneWidget);
   });
 }

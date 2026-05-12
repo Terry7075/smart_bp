@@ -9,6 +9,7 @@ import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/health/presentation/health_page.dart';
 import 'package:smart_bp/features/prescription/prescription_provider.dart';
 import 'package:smart_bp/features/profile/profile_provider.dart';
+import 'package:smart_bp/features/shop/presentation/shop_page.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task_provider.dart';
 
@@ -229,6 +230,14 @@ class _HomePageState extends ConsumerState<HomePage> {
         currentIndex: navIndex,
         onTap: (index) {
           print('點擊了 ${_bottomNavLabels[index]}');
+          if (index == 1) {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const ShopPage(),
+              ),
+            );
+            return;
+          }
           ref.read(homeBottomNavIndexProvider.notifier).select(index);
         },
         backgroundColor: colorScheme.surface,
