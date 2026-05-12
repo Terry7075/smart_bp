@@ -13,6 +13,9 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // flutter_local_notifications v18+ 要求啟用 core library desugaring，
+        // 讓 java.time、Stream 等 Java 8+ API 也能跑在舊版 Android。
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -41,4 +44,17 @@ android {
 
 flutter {
     source = "../.."
+}
+
+// google_mlkit_text_recognition 的非拉丁語系腳本（中 / 日 / 韓 / 天城文）需要
+// 額外宣告對應的 bundled 模型依賴，否則呼叫 TextRecognizer(script=chinese)
+// 會拋 NoClassDefFoundError 直接閃退。參考套件 README：
+// https://pub.dev/packages/google_mlkit_text_recognition
+dependencies {
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+
+    // 搭配上方 compileOptions.isCoreLibraryDesugaringEnabled = true，
+    // 提供 java.time / java.util.stream 等舊 Android 缺少的 API。
+    // flutter_local_notifications 21.x 官方文件指定的版本下限是 2.1.4。
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
