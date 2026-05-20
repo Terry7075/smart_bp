@@ -76,21 +76,53 @@ class VolunteerDashboard extends ConsumerWidget {
         ],
       ),
       body: SafeArea(
-        child: RefreshIndicator(
-          color: _volunteerBlue,
-          onRefresh: () =>
-              ref.read(volunteerTasksProvider.notifier).refresh(),
-          child: asyncTasks.when(
-            loading: () => const _LoadingView(),
-            error: (e, _) => _ErrorView(
-              error: e,
-              onRetry: () =>
-                  ref.read(volunteerTasksProvider.notifier).refresh(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Card(
+                elevation: 2,
+                clipBehavior: Clip.antiAlias,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: ListTile(
+                  leading: const Icon(Icons.storefront,
+                      color: _volunteerBlue, size: 36),
+                  title: const Text(
+                    '物資／柑仔店代購',
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: const Text(
+                    '長輩送出之代購需求（試作入口）',
+                    style: TextStyle(fontSize: 16),
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/volunteer/shop-orders'),
+                ),
+              ),
             ),
-            data: (tasks) => tasks.isEmpty
-                ? const _EmptyView()
-                : _TaskListView(tasks: tasks),
-          ),
+            Expanded(
+              child: RefreshIndicator(
+                color: _volunteerBlue,
+                onRefresh: () =>
+                    ref.read(volunteerTasksProvider.notifier).refresh(),
+                child: asyncTasks.when(
+                  loading: () => const _LoadingView(),
+                  error: (e, _) => _ErrorView(
+                    error: e,
+                    onRetry: () =>
+                        ref.read(volunteerTasksProvider.notifier).refresh(),
+                  ),
+                  data: (tasks) => tasks.isEmpty
+                      ? const _EmptyView()
+                      : _TaskListView(tasks: tasks),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

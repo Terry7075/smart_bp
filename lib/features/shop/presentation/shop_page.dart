@@ -2,15 +2,51 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/shop/data/image_proxy.dart';
 import 'package:smart_bp/features/shop/data/px_search_thumb_client.dart';
 import 'package:smart_bp/features/shop/domain/shop_product.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_provider.dart';
 import 'package:smart_bp/features/shop/presentation/shop_products_provider.dart';
+import 'package:smart_bp/features/shop/presentation/shop_volunteer_orders_provider.dart';
 import 'package:smart_bp/shared/widgets/mindu_loading_overlay.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+/// 全聯全電商（pxbox）首頁；`openExternalBrowser=1` 利於從 App／WebView 改以外部瀏覽器開啟。
+const String kPxMartBoxHomeUrl =
+    'https://pxbox.es.pxmart.com.tw/?openExternalBrowser=1&utm_source=google&utm_medium=md_cpc&utm_campaign=brand_main_conv_2605&utm_content=260508-260528_normal&gad_source=1';
+
+/// 與「全聯搜尋」按鈕相同：導向 pxbox 搜尋結果頁，關鍵字為 [ShopProduct.pxMartSearchKeyword]。
+Uri buildPxMartSearchResultUri(ShopProduct product) {
+  final kw = product.pxMartSearchKeyword.trim();
+  if (kw.isEmpty) {
+    return Uri.https('pxbox.es.pxmart.com.tw', '/', {'openExternalBrowser': '1'});
+  }
+  return Uri.https('pxbox.es.pxmart.com.tw', '/search/result', {
+    'keyword': kw,
+    'openExternalBrowser': '1',
+  });
+}
+
+Future<void> _openPxMartBoxHome(BuildContext context) async {
+  final uri = Uri.parse(kPxMartBoxHomeUrl);
+  try {
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('無法開啟全聯網頁，請稍後再試')),
+      );
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('開啟失敗：$e')),
+      );
+    }
+  }
+}
 
 class ShopPage extends ConsumerWidget {
   const ShopPage({super.key});
@@ -30,6 +66,32 @@ class ShopPage extends ConsumerWidget {
           '柑仔店',
           style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
         ),
+        actions: [
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: colorScheme.onPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            ),
+            icon: const Icon(Icons.receipt_long, size: 24),
+            label: const Text(
+              '我的需求',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            onPressed: () => context.push('/shop/orders'),
+          ),
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: colorScheme.onPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            icon: const Icon(Icons.store_mall_directory_outlined, size: 26),
+            label: const Text(
+              '全聯首頁',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            onPressed: () => _openPxMartBoxHome(context),
+          ),
+        ],
       ),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -67,6 +129,13 @@ class _ShopOrderView extends ConsumerStatefulWidget {
 class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
   late final Map<String, int> _quantities;
   final _searchController = TextEditingController();
+  final _manualBrandController = TextEditingController();
+  final _manualTitleController = TextEditingController();
+  final _manualSpecController = TextEditingController();
+  final _manualPxKeywordController = TextEditingController();
+  final _manualLinkController = TextEditingController();
+  final _manualPriceController = TextEditingController();
+  final List<ShopProduct> _manualProducts = [];
   String _search = '';
   String _selectedCategory = '全部';
   static const int _pageSize = 48;
@@ -83,23 +152,162 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
   @override
   void dispose() {
     _searchController.dispose();
+    _manualBrandController.dispose();
+    _manualTitleController.dispose();
+    _manualSpecController.dispose();
+    _manualPxKeywordController.dispose();
+    _manualLinkController.dispose();
+    _manualPriceController.dispose();
     super.dispose();
   }
 
+  List<ShopProduct> get _allProductsForOrder => [...widget.products, ..._manualProducts];
+
+  bool _isManualProductId(String id) => id.startsWith('manual_');
+
   void _changeQty(String id, int delta) {
     final current = _quantities[id] ?? 0;
-    setState(() => _quantities[id] = (current + delta).clamp(0, 999));
+    final next = (current + delta).clamp(0, 999);
+    if (_isManualProductId(id) && next <= 0) {
+      setState(() {
+        _manualProducts.removeWhere((p) => p.id == id);
+        _quantities.remove(id);
+      });
+      return;
+    }
+    setState(() => _quantities[id] = next);
   }
 
   int get _totalCount => _quantities.values.fold(0, (sum, qty) => sum + qty);
 
   double get _totalAmount {
     var total = 0.0;
-    for (final p in widget.products) {
+    for (final p in _allProductsForOrder) {
       final qty = _quantities[p.id] ?? 0;
       if (p.unitPrice != null && qty > 0) total += p.unitPrice! * qty;
     }
     return total;
+  }
+
+  void _clearManualFields() {
+    _manualBrandController.clear();
+    _manualTitleController.clear();
+    _manualSpecController.clear();
+    _manualPxKeywordController.clear();
+    _manualLinkController.clear();
+    _manualPriceController.clear();
+  }
+
+  /// 依表單組一筆手填商品；[id] 須為唯一（例如 `manual_…`）。
+  ShopProduct? _buildManualShopProductWithId(String id) {
+    final title = _manualTitleController.text.trim();
+    if (title.isEmpty) return null;
+    final brand = _manualBrandController.text.trim();
+    final specStr = _manualSpecController.text.trim();
+    final pxKw = _manualPxKeywordController.text.trim();
+
+    final nameBuf = StringBuffer('(手填) ');
+    if (brand.isNotEmpty) {
+      nameBuf.write('【$brand】');
+    }
+    nameBuf.write(title);
+
+    final linkRaw = _manualLinkController.text.trim();
+    String? sourceUrl;
+    if (linkRaw.isNotEmpty) {
+      final m = RegExp(r'https?://\S+').firstMatch(linkRaw);
+      sourceUrl = m?.group(0) ?? linkRaw;
+    }
+    final priceRaw = _manualPriceController.text.trim();
+    double? unitPrice;
+    if (priceRaw.isNotEmpty) {
+      unitPrice = double.tryParse(priceRaw.replaceAll(',', ''));
+    }
+    return ShopProduct(
+      id: id,
+      name: nameBuf.toString(),
+      spec: specStr.isEmpty ? null : specStr,
+      category: '手填／其他',
+      unitPrice: unitPrice,
+      unitLabel: '參考',
+      sourceUrl: sourceUrl,
+      productId: ShopProduct.parsePxProductId(sourceUrl),
+      promoText: '網站目錄未列；實際品項與價格以全聯為準。',
+      notes: 'manual_line',
+      fetchedAt: DateTime.now().toIso8601String(),
+      confidence: 'manual',
+      pxSearchKeywordOverride: pxKw.isEmpty ? null : pxKw,
+    );
+  }
+
+  Future<void> _launchPxMartSearchForProduct(ShopProduct product) async {
+    final uri = buildPxMartSearchResultUri(product);
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('無法開啟全聯搜尋頁，請稍後再試')),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已開啟全聯搜尋：${product.pxMartSearchKeyword}')),
+    );
+  }
+
+  /// 依目前表單開全聯搜尋；[addToCart] 為 true 時一併加入手填清單並數量 +1。
+  Future<void> _manualFormOpenPxSearch({required bool addToCart}) async {
+    final id = 'manual_${DateTime.now().microsecondsSinceEpoch}';
+    final p = _buildManualShopProductWithId(id);
+    if (p == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先填寫品名／品相')));
+      return;
+    }
+    final uri = buildPxMartSearchResultUri(p);
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('無法開啟全聯搜尋頁，請稍後再試')),
+      );
+      return;
+    }
+    if (addToCart) {
+      setState(() {
+        _manualProducts.add(p);
+        _quantities[p.id] = (_quantities[p.id] ?? 0) + 1;
+        _clearManualFields();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已加入 1 件並開啟全聯搜尋：${p.pxMartSearchKeyword}')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已開啟全聯搜尋：${p.pxMartSearchKeyword}')),
+      );
+    }
+  }
+
+  void _addManualProductLine() {
+    final id = 'manual_${DateTime.now().microsecondsSinceEpoch}';
+    final product = _buildManualShopProductWithId(id);
+    if (product == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請填寫品名／品相')));
+      return;
+    }
+    setState(() {
+      _manualProducts.add(product);
+      _quantities[product.id] = 1;
+      _clearManualFields();
+    });
+  }
+
+  void _removeManualProductLine(String id) {
+    if (!_isManualProductId(id)) return;
+    setState(() {
+      _manualProducts.removeWhere((p) => p.id == id);
+      _quantities.remove(id);
+    });
   }
 
   Future<void> _submitOrder() async {
@@ -120,17 +328,31 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
       final repo = ref.read(shopOrdersRepositoryProvider);
       final orderId = await repo.createOrder(
         userId: user.id,
-        products: widget.products,
+        products: _allProductsForOrder,
         quantitiesByProductId: _quantities,
       );
       if (!mounted) return;
+      ref.invalidate(shopVolunteerOrdersProvider);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已送出需求單：$orderId（待志工確認）')),
+        SnackBar(
+          content: Text('已送出需求單（編號前 8 碼：${orderId.length >= 8 ? orderId.substring(0, 8) : orderId}…）\n志工可在「物資／柑仔店需求」查看'),
+          action: SnackBarAction(
+            label: '查看我的需求',
+            onPressed: () {
+              if (mounted) context.push('/shop/orders');
+            },
+          ),
+        ),
       );
       setState(() {
-        for (final k in _quantities.keys) {
-          _quantities[k] = 0;
+        for (final k in _quantities.keys.toList()) {
+          if (_isManualProductId(k)) {
+            _quantities.remove(k);
+          } else {
+            _quantities[k] = 0;
+          }
         }
+        _manualProducts.clear();
       });
     } on PostgrestException catch (e) {
       if (!mounted) return;
@@ -178,6 +400,211 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
             child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
+              Card(
+                color: widget.colorScheme.primaryContainer.withValues(alpha: 0.35),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline, color: widget.colorScheme.primary, size: 26),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Demo：商品與參考價來自目錄；實際以全聯門市／官網為準。自訂手填區可收起；「全聯搜尋」會用關鍵字開 pxbox 搜尋頁，並可一併加入**本站需求清單**（非全聯官網購物車）。送出後志工可於「物資／柑仔店代購」查看。',
+                          style: TextStyle(
+                            fontSize: 16,
+                            height: 1.35,
+                            color: widget.colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Card(
+                elevation: 0,
+                color: widget.colorScheme.secondaryContainer.withValues(alpha: 0.45),
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Theme(
+                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                      child: ExpansionTile(
+                        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
+                        shape: const RoundedRectangleBorder(side: BorderSide.none),
+                        iconColor: widget.colorScheme.onSecondaryContainer,
+                        collapsedIconColor: widget.colorScheme.onSecondaryContainer,
+                        leading: Icon(
+                          Icons.edit_note,
+                          color: widget.colorScheme.onSecondaryContainer,
+                          size: 26,
+                        ),
+                        title: Text(
+                          '自訂商品（手填）',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 17,
+                            color: widget.colorScheme.onSecondaryContainer,
+                          ),
+                        ),
+                        subtitle: Text(
+                          _manualProducts.isEmpty
+                              ? '全聯有賣、本站沒列時，點開填寫'
+                              : '已加入 ${_manualProducts.length} 筆（可收起）',
+                          style: TextStyle(
+                            fontSize: 14,
+                            height: 1.3,
+                            color: widget.colorScheme.onSecondaryContainer.withValues(alpha: 0.88),
+                          ),
+                        ),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  '品名必填；品牌、規格、全聯搜尋關鍵字可選。有填「全聯搜尋關鍵字」時，搜尋頁只帶該字串。按「僅開全聯搜尋」不會加入下方清單；「加入並開全聯搜尋」會加入我們的需求數量並開搜尋頁。',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    height: 1.35,
+                                    color: widget.colorScheme.onSecondaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                TextField(
+                                  controller: _manualBrandController,
+                                  textInputAction: TextInputAction.next,
+                                  decoration: InputDecoration(
+                                    labelText: '品牌（選填）',
+                                    hintText: '例：義美',
+                                    filled: true,
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: _manualTitleController,
+                                  textInputAction: TextInputAction.next,
+                                  decoration: InputDecoration(
+                                    labelText: '品名／品相（必填）',
+                                    hintText: '例：小泡芙 巧克力 57g',
+                                    filled: true,
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: _manualSpecController,
+                                  textInputAction: TextInputAction.next,
+                                  decoration: InputDecoration(
+                                    labelText: '規格補充（選填）',
+                                    hintText: '例：6入組、有效日期需求等',
+                                    filled: true,
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: _manualPxKeywordController,
+                                  textInputAction: TextInputAction.next,
+                                  decoration: InputDecoration(
+                                    labelText: '全聯搜尋關鍵字（選填）',
+                                    hintText: '有填時，全聯搜尋頁只使用這一行',
+                                    filled: true,
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: _manualLinkController,
+                                  textInputAction: TextInputAction.next,
+                                  keyboardType: TextInputType.url,
+                                  decoration: InputDecoration(
+                                    labelText: '全聯商品連結（選填）',
+                                    hintText: 'https://pxbox.es.pxmart.com.tw/product/…',
+                                    filled: true,
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: _manualPriceController,
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  decoration: InputDecoration(
+                                    labelText: '參考單價（選填）',
+                                    hintText: '僅供估算，以全聯標價為準',
+                                    filled: true,
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  alignment: WrapAlignment.end,
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    OutlinedButton.icon(
+                                      onPressed: () => _manualFormOpenPxSearch(addToCart: false),
+                                      icon: const Icon(Icons.travel_explore_outlined, size: 20),
+                                      label: const Text('僅開全聯搜尋'),
+                                    ),
+                                    FilledButton.tonalIcon(
+                                      onPressed: () => _manualFormOpenPxSearch(addToCart: true),
+                                      icon: const Icon(Icons.add_shopping_cart),
+                                      label: const Text('加入並開全聯搜尋'),
+                                    ),
+                                    FilledButton.tonalIcon(
+                                      onPressed: _addManualProductLine,
+                                      icon: const Icon(Icons.playlist_add_outlined),
+                                      label: const Text('加入需求清單'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_manualProducts.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Divider(height: 1, color: widget.colorScheme.outlineVariant),
+                            const SizedBox(height: 10),
+                            Text(
+                              '手填品項（${_manualProducts.length}）',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: widget.colorScheme.onSecondaryContainer,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            for (final p in _manualProducts)
+                              _ManualLineTile(
+                                product: p,
+                                quantity: _quantities[p.id] ?? 0,
+                                colorScheme: widget.colorScheme,
+                                onAdd: () => _changeQty(p.id, 1),
+                                onRemove: () => _changeQty(p.id, -1),
+                                onDeleteLine: () => _removeManualProductLine(p.id),
+                                onOpenPxSearch: () => _launchPxMartSearchForProduct(p),
+                              ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
               TextField(
                 controller: _searchController,
                 onChanged: (value) => setState(() {
@@ -275,6 +702,7 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
                         quantity: _quantities[p.id] ?? 0,
                         onAdd: () => _changeQty(p.id, 1),
                         onRemove: () => _changeQty(p.id, -1),
+                        onAddWhenPxSearchOpened: () => _changeQty(p.id, 1),
                       );
                     },
                   );
@@ -324,6 +752,116 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
   }
 }
 
+class _ManualLineTile extends StatelessWidget {
+  const _ManualLineTile({
+    required this.product,
+    required this.quantity,
+    required this.colorScheme,
+    required this.onAdd,
+    required this.onRemove,
+    required this.onDeleteLine,
+    required this.onOpenPxSearch,
+  });
+
+  final ShopProduct product;
+  final int quantity;
+  final ColorScheme colorScheme;
+  final VoidCallback onAdd;
+  final VoidCallback onRemove;
+  final VoidCallback onDeleteLine;
+  final VoidCallback onOpenPxSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = product.sourceUrl;
+    final priceText = product.unitPrice != null
+        ? 'NT\$${product.unitPrice!.toStringAsFixed(0)}／件'
+        : '單價未填（以全聯為準）';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: colorScheme.surface.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(product.name, style: const TextStyle(fontWeight: FontWeight.w600, height: 1.25)),
+              if (product.spec != null && product.spec!.trim().isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '規格：${product.spec}',
+                  style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
+                ),
+              ],
+              const SizedBox(height: 4),
+              Text(
+                '全聯搜尋：${product.pxMartSearchKeyword}'
+                '${product.pxSearchKeywordOverride != null && product.pxSearchKeywordOverride!.trim().isNotEmpty ? '（自訂關鍵字）' : '（由品名組合）'}',
+                style: TextStyle(fontSize: 13, color: colorScheme.tertiary),
+              ),
+              const SizedBox(height: 4),
+              Text(priceText, style: TextStyle(fontSize: 13, color: colorScheme.primary)),
+              if (url != null && url.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                SelectableText(
+                  url,
+                  style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+                  maxLines: 2,
+                ),
+              ] else ...[
+                const SizedBox(height: 4),
+                Text(
+                  '無商品連結（志工可依品名在全聯搜尋）',
+                  style: TextStyle(fontSize: 12, color: colorScheme.outline),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: onOpenPxSearch,
+                  icon: const Icon(Icons.open_in_new, size: 18),
+                  label: const Text('全聯搜尋'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: colorScheme.primary,
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  OutlinedButton(
+                    onPressed: quantity > 0 ? onRemove : null,
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(40, 36), padding: EdgeInsets.zero),
+                    child: const Text('－'),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('$quantity', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: onAdd,
+                    style: FilledButton.styleFrom(minimumSize: const Size(40, 36), padding: EdgeInsets.zero),
+                    child: const Text('＋'),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: onDeleteLine,
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    label: const Text('移除'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _CategoryChip extends StatelessWidget {
   const _CategoryChip({required this.label, required this.selected, required this.onTap});
   final String label;
@@ -346,6 +884,7 @@ class _ProductCard extends StatelessWidget {
     required this.quantity,
     required this.onAdd,
     required this.onRemove,
+    this.onAddWhenPxSearchOpened,
   });
 
   final ShopProduct product;
@@ -353,6 +892,8 @@ class _ProductCard extends StatelessWidget {
   final int quantity;
   final VoidCallback onAdd;
   final VoidCallback onRemove;
+  /// 成功開啟全聯搜尋頁後，為**本站需求清單** +1（全聯網站購物車須在全聯頁面自行操作）。
+  final VoidCallback? onAddWhenPxSearchOpened;
   static final Uri _pxMartHomeUri = Uri.parse(
     'https://pxbox.es.pxmart.com.tw/?openExternalBrowser=1&utm_source=google&utm_medium=md_cpc&utm_campaign=brand_main_conv_2603&utm_content=260328-260507_normal&gad_source=1',
   );
@@ -430,7 +971,11 @@ class _ProductCard extends StatelessWidget {
                           ],
                         ),
                         TextButton.icon(
-                          onPressed: product.sourceUrl == null ? null : () => _openProductUrl(context, product),
+                          onPressed: () => _openProductUrl(
+                            context,
+                            product,
+                            onAddWhenPxSearchOpened: onAddWhenPxSearchOpened,
+                          ),
                           icon: const Icon(Icons.open_in_new, size: 16),
                           label: const Text('全聯搜尋', style: TextStyle(fontSize: 12)),
                           style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
@@ -452,11 +997,20 @@ class _ProductCard extends StatelessWidget {
     );
   }
 
-  static Future<void> _openProductUrl(BuildContext context, ShopProduct product) async {
-    // 需求改為：直接導向全聯搜尋結果，避免過期 product URL 漂移到錯誤商品。
-    final searchUri = _buildPxSearchUri(product);
+  static Future<void> _openProductUrl(
+    BuildContext context,
+    ShopProduct product, {
+    VoidCallback? onAddWhenPxSearchOpened,
+  }) async {
+    final searchUri = buildPxMartSearchResultUri(product);
     final openedSearch = await launchUrl(searchUri, mode: LaunchMode.externalApplication);
     if (openedSearch) {
+      onAddWhenPxSearchOpened?.call();
+      if (context.mounted && onAddWhenPxSearchOpened != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已開啟全聯搜尋「${product.pxMartSearchKeyword}」，並為需求清單 +1')),
+        );
+      }
       return;
     }
 
@@ -471,13 +1025,6 @@ class _ProductCard extends StatelessWidget {
       );
     }
   }
-
-  static Uri _buildPxSearchUri(ShopProduct product) {
-    final keyword = _buildSearchKeyword(product);
-    return Uri.https('pxbox.es.pxmart.com.tw', '/search/result', {'keyword': keyword});
-  }
-
-  static String _buildSearchKeyword(ShopProduct product) => product.pxMartSearchKeyword;
 
   static Future<void> _showProductDetail(BuildContext context, ShopProduct product) async {
     await showModalBottomSheet<void>(
@@ -533,6 +1080,11 @@ class _ShopProductImage extends StatefulWidget {
 class _ShopProductImageState extends State<_ShopProductImage> {
   static const Color _photoBg = Color(0xFFF8F8F8);
 
+  /// 預設 **false**（Demo 穩定）：先顯示種子目錄的圖，失敗才嘗試本機縮圖 API。
+  /// 需要全聯搜尋縮圖時請加：`--dart-define=SHOP_PX_THUMB=true`
+  static const bool _usePxThumbFirst =
+      bool.fromEnvironment('SHOP_PX_THUMB', defaultValue: false);
+
   /// 圖搜全聯縮圖 API。
   ///
   /// - 可用 `--dart-define=PX_SEARCH_THUMB_API=...` 覆寫（Android 模擬器通常是 `http://10.0.2.2:8790`）
@@ -543,7 +1095,7 @@ class _ShopProductImageState extends State<_ShopProductImage> {
     return 'http://127.0.0.1:8790';
   }
 
-  bool get _preferPxThumb => true;
+  bool get _preferPxThumb => _usePxThumbFirst;
 
   String? _url;
   bool _loadingPx = false;
@@ -571,9 +1123,9 @@ class _ShopProductImageState extends State<_ShopProductImage> {
     if (_preferPxThumb) {
       _pxFetchStarted = true;
       _loadPxThumbFirst();
-      return;
+    } else {
+      _applySeedUrl();
     }
-    _applySeedUrl();
   }
 
   void _applySeedUrl() {
@@ -632,8 +1184,13 @@ class _ShopProductImageState extends State<_ShopProductImage> {
     _url = null;
     _loadingPx = false;
     _pxRetryCount = 0;
-    _pxFetchStarted = true;
-    _loadPxThumbFirst();
+    _pxFetchStarted = false;
+    if (_preferPxThumb) {
+      _pxFetchStarted = true;
+      _loadPxThumbFirst();
+    } else {
+      _applySeedUrl();
+    }
   }
 
   void _onNetworkImageError() {

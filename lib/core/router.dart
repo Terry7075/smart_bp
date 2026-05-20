@@ -3,13 +3,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_bp/features/assistant/presentation/assistant_page.dart';
 import 'package:smart_bp/features/auth/login_page.dart';
 import 'package:smart_bp/features/health_ocr/health_scan_page.dart';
 import 'package:smart_bp/features/home/presentation/home_page.dart';
 import 'package:smart_bp/features/medication/medication_checkin_page.dart';
 import 'package:smart_bp/features/profile/profile_page.dart';
 import 'package:smart_bp/features/profile/profile_provider.dart';
+import 'package:smart_bp/features/shop/presentation/shop_route_page.dart';
+import 'package:smart_bp/features/shop/presentation/shop_elder_orders_page.dart';
 import 'package:smart_bp/features/volunteer/volunteer_dashboard.dart';
+import 'package:smart_bp/features/volunteer/volunteer_shop_orders_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// 綁定 Supabase `auth.onAuthStateChange`，登入／登出時通知 [GoRouter] 重跑 [GoRouter.redirect]。
@@ -81,11 +85,30 @@ GoRouter get appRouter =>
         ),
         GoRoute(
           path: '/home',
-          builder: (context, state) => const HomePage(),
+          builder: (context, state) {
+            final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
+            return HomePage(initialTab: tab.clamp(0, 5));
+          },
+        ),
+        GoRoute(
+          path: '/assistant',
+          builder: (context, state) => const AssistantPage(),
         ),
         GoRoute(
           path: '/volunteer-dashboard',
           builder: (context, state) => const VolunteerDashboard(),
+        ),
+        GoRoute(
+          path: '/shop',
+          builder: (context, state) => const ShopRoutePage(),
+        ),
+        GoRoute(
+          path: '/shop/orders',
+          builder: (context, state) => const ShopElderOrdersPage(),
+        ),
+        GoRoute(
+          path: '/volunteer/shop-orders',
+          builder: (context, state) => const VolunteerShopOrdersPage(),
         ),
         GoRoute(
           path: '/health-scan',

@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 健康處方籤 OCR 需使用相機 -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- 本機提醒（吃藥時間 / 領藥日）需要的權限 -->
     <!-- Android 13 (API 33) 之後使用通知前必須先取得使用者同意 -->
