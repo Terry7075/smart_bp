@@ -17,8 +17,9 @@ abstract final class AssistantIntent {
     if (n.isEmpty) return AssistantQueryKind.casual;
 
     if (_isClearlyCasual(n)) return AssistantQueryKind.casual;
-    if (_isSystemData(n)) return AssistantQueryKind.systemData;
+    if (_isShopOrOrderStatusQuery(n)) return AssistantQueryKind.systemData;
     if (_isAppGuide(n)) return AssistantQueryKind.appGuide;
+    if (_isSystemData(n)) return AssistantQueryKind.systemData;
 
     return AssistantQueryKind.casual;
   }
@@ -63,6 +64,14 @@ abstract final class AssistantIntent {
     return false;
   }
 
+  /// 代購／訂單狀態查詢（優先於「怎麼用」類帶路，避免誤判 appGuide）。
+  static bool _isShopOrOrderStatusQuery(String n) {
+    if (!_contains(n, ['代購', '訂單', '需求單', '配送', '物資'])) return false;
+    return _contains(n, [
+      '進度', '狀態', '查', '好了嗎', '怎麼了', '到哪', '送達', '物流', '採買',
+    ]);
+  }
+
   static bool _isSystemData(String n) {
     const dataKeys = [
       '藥單', '處方', '代購', '訂單', '需求單', '志工', '掃描', 'ocr',
@@ -76,7 +85,7 @@ abstract final class AssistantIntent {
     }
 
     if (_contains(n, ['代購', '訂單', '柑仔店', '商店']) &&
-        _contains(n, ['哪', '進度', '狀態', '怎麼', '查', '好了嗎'])) {
+        _contains(n, ['哪', '進度', '狀態', '怎麼了', '查', '好了嗎', '配送', '送達'])) {
       return true;
     }
 
@@ -84,10 +93,23 @@ abstract final class AssistantIntent {
       return true;
     }
 
+    if (_contains(n, ['配送', '送達', '採買', '送到', '物流', '進度'])) {
+      return true;
+    }
+
+    if (_contains(n, ['上一筆', '上一單', '那筆', '剛才那', '剛剛那', '再查一次'])) {
+      return true;
+    }
+
     return false;
   }
 
   static bool _isAppGuide(String n) {
+    if (_contains(n, ['代購', '訂單', '需求單']) &&
+        _contains(n, ['哪', '進度', '狀態', '怎麼了', '好了嗎', '查到', '配送', '送達'])) {
+      return false;
+    }
+
     const guideKeys = [
       '怎麼', '如何', '在哪', '哪裡', '哪一', '帶我', '帶您', '前往', '打開',
       '全部', '所有', '功能', '導覽', '教學', '地圖', '不會用', '教我',

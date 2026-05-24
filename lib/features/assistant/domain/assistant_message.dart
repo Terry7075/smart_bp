@@ -7,6 +7,7 @@ class AssistantMessage {
     required this.text,
     required this.at,
     this.actions = const [],
+    this.intentLabel,
   });
 
   final AssistantMessageRole role;
@@ -16,6 +17,9 @@ class AssistantMessage {
   /// 助手訊息可附一鍵帶路按鈕（使用者訊息通常為空）。
   final List<AssistantNavAction> actions;
 
+  /// 第五章：意圖類別標籤（記錄需求／查價／查看／取消／一般對話等）。
+  final String? intentLabel;
+
   bool get isUser => role == AssistantMessageRole.user;
   bool get isAssistant => role == AssistantMessageRole.assistant;
 
@@ -24,6 +28,7 @@ class AssistantMessage {
         'text': text,
         'at': at.toIso8601String(),
         'actions': actions.map((a) => a.toJson()).toList(),
+        if (intentLabel != null) 'intent_label': intentLabel,
       };
 
   factory AssistantMessage.fromJson(Map<String, dynamic> json) {
@@ -48,6 +53,7 @@ class AssistantMessage {
       text: json['text']?.toString() ?? '',
       at: DateTime.tryParse(json['at']?.toString() ?? '') ?? DateTime.now(),
       actions: actions,
+      intentLabel: json['intent_label']?.toString(),
     );
   }
 }

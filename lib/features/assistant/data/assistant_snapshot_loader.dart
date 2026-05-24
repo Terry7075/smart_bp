@@ -26,6 +26,7 @@ class AssistantSnapshotLoader {
       displayName: profile?.name,
       latestPrescription: task,
       recentOrders: orders,
+      loadedAt: DateTime.now(),
     );
   }
 

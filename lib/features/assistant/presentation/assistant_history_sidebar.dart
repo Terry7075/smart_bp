@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:smart_bp/features/assistant/data/assistant_history_date_groups.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_chat_session.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_history_provider.dart';
@@ -69,6 +70,23 @@ class AssistantHistorySidebar extends ConsumerWidget {
                 style: FilledButton.styleFrom(
                   backgroundColor: _green,
                   minimumSize: const Size(double.infinity, 48),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  onCloseDrawer?.call();
+                  context.push('/assistant/history');
+                },
+                icon: const Icon(Icons.timeline, size: 24),
+                label: const Text(
+                  '完整時間軸',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                ),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 44),
                 ),
               ),
             ),

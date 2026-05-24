@@ -1,17 +1,11 @@
-# smart_bp
+# 明德 e 達人（smart_bp）
 
-A new Flutter project.
+Flutter + Supabase 社區長輩 App。
 
-## Getting Started
+**個人負責模組（物資代購 + 智慧小幫手）** 請見：[docs/SHOP_ASSISTANT_README.md](docs/SHOP_ASSISTANT_README.md)
 
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter pub get
+flutter run -d chrome --web-port=8080
+flutter test test/assistant_intent_test.dart test/assistant_dialog_context_test.dart
+```

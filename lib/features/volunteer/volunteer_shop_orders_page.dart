@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
+import 'package:smart_bp/features/shop/data/demand_records_repository.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
+import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_provider.dart';
-import 'package:smart_bp/features/shop/presentation/shop_volunteer_orders_provider.dart';
+import 'package:smart_bp/features/shop/presentation/shop_orders_realtime_provider.dart';
+import 'package:smart_bp/features/shop/presentation/volunteer_demands_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// 志工端：全聯／柑仔店參考需求單列表（Supabase）。
@@ -50,9 +54,24 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
     };
   }
 
+  static Map<String, List<ShopOrderListRow>> _groupByLocation(
+    List<ShopOrderListRow> orders,
+  ) {
+    final map = <String, List<ShopOrderListRow>>{};
+    for (final o in orders) {
+      final key = (o.locationPointName ?? '').trim().isEmpty
+          ? '未指定據點'
+          : o.locationPointName!.trim();
+      map.putIfAbsent(key, () => []).add(o);
+    }
+    final keys = map.keys.toList()..sort();
+    return {for (final k in keys) k: map[k]!};
+  }
+
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(shopVolunteerOrdersProvider);
+    final drafts = ref.watch(volunteerDemandDraftsProvider);
 
     return RoleGuard(
       requiredRole: RoleGuardTarget.volunteer,
@@ -89,7 +108,9 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
             ),
             data: (orders) {
               final filtered = _applyFilter(orders);
-              if (filtered.isEmpty) {
+              final grouped = _groupByLocation(filtered);
+              if (filtered.isEmpty &&
+                  drafts.maybeWhen(data: (d) => d.isEmpty, orElse: () => true)) {
                 return _EmptyBody(
                   onRefresh: () => ref.invalidate(shopVolunteerOrdersProvider),
                 );
@@ -98,82 +119,157 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
                 color: VolunteerShopOrdersPage._volunteerBlue,
                 onRefresh: () async {
                   ref.invalidate(shopVolunteerOrdersProvider);
+                  ref.invalidate(volunteerDemandDraftsProvider);
+                  ref.invalidate(shopVolunteerOrdersProvider);
                   await ref.read(shopVolunteerOrdersProvider.future);
                 },
-                child: ListView.builder(
+                child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  itemCount: filtered.length + 1,
-                  itemBuilder: (context, index) {
-                    if (index == 0) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Column(
+                  children: [
+                    _buildHeader(context),
+                    drafts.when(
+                      data: (list) {
+                        if (list.isEmpty) return const SizedBox.shrink();
+                        final byLoc = <String, List<DemandRecord>>{};
+                        for (final d in list) {
+                          final k = (d.locationName ?? '').trim().isEmpty
+                              ? '未指定據點'
+                              : d.locationName!.trim();
+                          byLoc.putIfAbsent(k, () => []).add(d);
+                        }
+                        return Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Card(
-                              color: Colors.blue.shade50,
-                              child: Padding(
-                                padding: const EdgeInsets.all(14),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Icon(
-                                      Icons.info_outline,
-                                      color: VolunteerShopOrdersPage._volunteerBlue,
-                                      size: 28,
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Text(
-                                        '以下為長輩從「柑仔店」送出的參考需求；價格以全聯門市／官網為準。若看不到姓名，請在 Supabase 為志工加上讀取 profiles 的 policy（見 orders_schema.sql 註解）。',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          height: 1.4,
-                                          color: Colors.grey.shade900,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              '語音／小幫手草稿需求（依據點）',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
-                            const SizedBox(height: 10),
-                            SegmentedButton<_OrderViewFilter>(
-                              segments: const [
-                                ButtonSegment(
-                                  value: _OrderViewFilter.active,
-                                  label: Text('進行中'),
-                                  icon: Icon(Icons.incomplete_circle_outlined),
+                            const SizedBox(height: 8),
+                            for (final e in byLoc.entries)
+                              ExpansionTile(
+                                initiallyExpanded: true,
+                                title: Text(
+                                  '${e.key}（${e.value.length} 筆草稿）',
+                                  style: const TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
-                                ButtonSegment(
-                                  value: _OrderViewFilter.history,
-                                  label: Text('歷史'),
-                                  icon: Icon(Icons.history),
-                                ),
-                                ButtonSegment(
-                                  value: _OrderViewFilter.all,
-                                  label: Text('全部'),
-                                  icon: Icon(Icons.view_list_outlined),
-                                ),
-                              ],
-                              selected: <_OrderViewFilter>{_filter},
-                              onSelectionChanged: (set) {
-                                final next = set.isEmpty ? _OrderViewFilter.active : set.first;
-                                setState(() => _filter = next);
-                              },
-                            ),
+                                children: [
+                                  for (final d in e.value)
+                                    ListTile(
+                                      title: Text(
+                                        d.activeItems
+                                            .map((i) =>
+                                                '${i.productName}×${i.quantity}')
+                                            .join('、'),
+                                        style: const TextStyle(fontSize: 16),
+                                      ),
+                                      subtitle: Text(
+                                        '草稿 · ${VolunteerShopOrdersPage._formatTime(d.updatedAt)}',
+                                      ),
+                                    ),
+                                ],
+                              ),
                           ],
+                        );
+                      },
+                      loading: () => const SizedBox.shrink(),
+                      error: (_, __) => const SizedBox.shrink(),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      '已送出訂單（依據點）',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    for (final entry in grouped.entries)
+                      ExpansionTile(
+                        initiallyExpanded: true,
+                        title: Text(
+                          '${entry.key}（${entry.value.length} 筆）',
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      );
-                    }
-                    final o = filtered[index - 1];
-                    return _OrderCard(order: o);
-                  },
+                        children: [
+                          for (final o in entry.value) _OrderCard(order: o),
+                        ],
+                      ),
+                  ],
                 ),
               );
             },
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Card(
+            color: Colors.blue.shade50,
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: VolunteerShopOrdersPage._volunteerBlue,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '以下為長輩從「柑仔店」送出的參考需求；價格以全聯門市／官網為準。若看不到姓名，請在 Supabase 為志工加上讀取 profiles 的 policy（見 orders_schema.sql 註解）。',
+                      style: TextStyle(
+                        fontSize: 16,
+                        height: 1.4,
+                        color: Colors.grey.shade900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SegmentedButton<_OrderViewFilter>(
+            segments: const [
+              ButtonSegment(
+                value: _OrderViewFilter.active,
+                label: Text('進行中'),
+                icon: Icon(Icons.incomplete_circle_outlined),
+              ),
+              ButtonSegment(
+                value: _OrderViewFilter.history,
+                label: Text('歷史'),
+                icon: Icon(Icons.history),
+              ),
+              ButtonSegment(
+                value: _OrderViewFilter.all,
+                label: Text('全部'),
+                icon: Icon(Icons.view_list_outlined),
+              ),
+            ],
+            selected: <_OrderViewFilter>{_filter},
+            onSelectionChanged: (set) {
+              final next = set.isEmpty ? _OrderViewFilter.active : set.first;
+              setState(() => _filter = next);
+            },
+          ),
+        ],
       ),
     );
   }
@@ -234,6 +330,60 @@ class _OrderCard extends ConsumerWidget {
           content: Text('更新失敗：$e\n若為權限問題，請在 Supabase 執行 orders_volunteer_update_rls.sql'),
         ),
       );
+    }
+  }
+
+  Future<void> _acceptOrder(BuildContext context, WidgetRef ref) async {
+    final vid = Supabase.instance.client.auth.currentUser?.id;
+    if (vid == null) return;
+    try {
+      await ref.read(shopOrdersRepositoryProvider).acceptOrderByVolunteer(
+            orderId: order.id,
+            volunteerId: vid,
+          );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已接單，配送時間軸已更新')),
+      );
+      ref.invalidate(shopVolunteerOrdersProvider);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('接單失敗：$e')));
+    }
+  }
+
+  Future<void> _milestone(
+    BuildContext context,
+    WidgetRef ref,
+    String eventType,
+    String label,
+  ) async {
+    try {
+      await ref.read(shopOrdersRepositoryProvider).addDeliveryMilestone(
+            orderId: order.id,
+            eventType: eventType,
+            note: label,
+          );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已記錄：$label')));
+      ref.invalidate(shopVolunteerOrdersProvider);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('失敗：$e')));
+    }
+  }
+
+  Future<void> _complete(BuildContext context, WidgetRef ref) async {
+    try {
+      await ref.read(shopOrdersRepositoryProvider).completeDelivery(orderId: order.id);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已標記送達')),
+      );
+      ref.invalidate(shopVolunteerOrdersProvider);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('失敗：$e')));
     }
   }
 
@@ -329,7 +479,7 @@ class _OrderCard extends ConsumerWidget {
                         ),
                       );
                       if (ok == true && context.mounted) {
-                        await _setStatus(context, ref, 'processing');
+                        await _acceptOrder(context, ref);
                       }
                     },
                     icon: const Icon(Icons.shopping_cart_checkout, size: 22),
@@ -341,9 +491,39 @@ class _OrderCard extends ConsumerWidget {
                   ),
                 if (order.status == 'processing')
                   FilledButton.icon(
-                    onPressed: () => _setStatus(context, ref, 'completed'),
+                    onPressed: () => _milestone(
+                      context,
+                      ref,
+                      ShopOrderStatus.purchasing,
+                      '志工正在門市採買',
+                    ),
+                    icon: const Icon(Icons.shopping_basket_outlined, size: 22),
+                    label: const Text('採買中', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF1565C0),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                if (order.status == 'processing')
+                  FilledButton.icon(
+                    onPressed: () => _milestone(
+                      context,
+                      ref,
+                      ShopOrderStatus.delivering,
+                      '物資配送中',
+                    ),
+                    icon: const Icon(Icons.local_shipping_outlined, size: 22),
+                    label: const Text('配送中', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF1565C0),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                if (order.status == 'processing')
+                  FilledButton.icon(
+                    onPressed: () => _complete(context, ref),
                     icon: const Icon(Icons.check_circle_outline, size: 22),
-                    label: const Text('標記完成', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                    label: const Text('已送達', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                     style: FilledButton.styleFrom(
                       backgroundColor: _green,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -436,6 +616,12 @@ class _OrderCard extends ConsumerWidget {
             SelectableText(
               '訂單編號：${order.id}',
               style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => context.push('/shop/orders/${order.id}'),
+              icon: const Icon(Icons.timeline),
+              label: const Text('配送時間軸', style: TextStyle(fontSize: 16)),
             ),
           ],
         ),

@@ -10,7 +10,13 @@ enum UserRole {
   elder('elder'),
 
   /// 社區志工：須持村辦公室發放的邀請碼才能註冊。
-  volunteer('volunteer');
+  volunteer('volunteer'),
+
+  /// 家屬：可綁定長輩、查看代購進度。
+  family('family'),
+
+  /// 管理員：物資統計後台。
+  admin('admin');
 
   const UserRole(this.dbValue);
 

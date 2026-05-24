@@ -1,4 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:smart_bp/features/assistant/data/assistant_dialog_context.dart';
+import 'package:smart_bp/features/assistant/data/assistant_shop_intent_classifier.dart';
+import 'package:smart_bp/features/assistant/domain/assistant_shop_intent.dart';
 import 'package:smart_bp/features/assistant/data/assistant_hints.dart';
 import 'package:smart_bp/features/assistant/data/assistant_history_repository.dart';
 import 'package:smart_bp/features/assistant/data/assistant_reply_orchestrator.dart';
@@ -232,10 +235,15 @@ class AssistantChat extends Notifier<AssistantChatState> {
     final text = raw.trim();
     if (text.isEmpty || state.loading) return;
 
+    final shopPreview = AssistantShopIntentClassifier.classify(text);
     final userMsg = AssistantMessage(
       role: AssistantMessageRole.user,
       text: text,
       at: DateTime.now(),
+      intentLabel: shopPreview.intent != AssistantShopIntent.casual ||
+              (shopPreview.slots != null && !shopPreview.slots!.isEmpty)
+          ? shopPreview.intentLabel
+          : null,
     );
     state = state.copyWith(
       messages: [...state.messages, userMsg],
@@ -245,16 +253,23 @@ class AssistantChat extends Notifier<AssistantChatState> {
     try {
       final snapshot =
           await ref.read(assistantSnapshotLoaderProvider).load();
-      final reply = await ref.read(assistantReplyOrchestratorProvider).reply(
-            question: text,
+      final resolved = AssistantDialogContext.resolve(
+        question: text,
+        conversation: state.messages,
+      );
+      final userId = _userId;
+      final meta = await ref.read(assistantReplyOrchestratorProvider).replyWithMeta(
+            question: resolved,
             snapshot: snapshot,
             conversation: state.messages,
+            userId: userId,
           );
       final assistantMsg = AssistantMessage(
         role: AssistantMessageRole.assistant,
-        text: reply.text,
+        text: meta.reply.text,
         at: DateTime.now(),
-        actions: reply.actions,
+        actions: meta.reply.actions,
+        intentLabel: meta.assistantIntentLabel,
       );
       state = state.copyWith(
         messages: [...state.messages, assistantMsg],

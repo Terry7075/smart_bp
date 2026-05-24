@@ -57,14 +57,21 @@ class RoleGuard extends ConsumerWidget {
     final shouldBeHere = switch (requiredRole) {
       RoleGuardTarget.elder => profile.isElder,
       RoleGuardTarget.volunteer => profile.isVolunteer,
+      RoleGuardTarget.family => profile.isFamily,
+      RoleGuardTarget.admin => profile.isAdmin,
     };
     if (shouldBeHere) return;
 
-    final target = profile.isVolunteer ? '/volunteer-dashboard' : '/home';
+    final target = switch (profile.role) {
+      Profile.kRoleVolunteer => '/volunteer-dashboard',
+      Profile.kRoleFamily => '/family/home',
+      Profile.kRoleAdmin => '/admin/dashboard',
+      _ => '/home',
+    };
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (context.mounted) context.go(target);
     });
   }
 }
 
-enum RoleGuardTarget { elder, volunteer }
+enum RoleGuardTarget { elder, volunteer, family, admin }

@@ -7,9 +7,13 @@ class AssistantSnapshot {
     this.displayName,
     this.latestPrescription,
     this.recentOrders = const [],
+    this.loadedAt,
   });
 
   final String? displayName;
   final VolunteerTask? latestPrescription;
   final List<ShopOrderListRow> recentOrders;
+
+  /// 本次從 Supabase 讀取完成的時間（供回覆標註資料新鮮度）。
+  final DateTime? loadedAt;
 }

@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
-import 'package:smart_bp/features/shop/presentation/shop_elder_orders_provider.dart';
+import 'package:smart_bp/features/shop/presentation/shop_orders_realtime_provider.dart';
 
 class ShopElderOrdersPage extends ConsumerWidget {
   const ShopElderOrdersPage({super.key});
@@ -88,7 +88,6 @@ class ShopElderOrdersPage extends ConsumerWidget {
                       );
                     }
                     final o = orders[index - 1];
-                    // 列表由上而下為 1、2、3…（與目前排序一致：較新的在上）
                     return _OrderCard(order: o, displayNo: index);
                   },
                 ),
@@ -149,6 +148,16 @@ class _OrderCard extends StatelessWidget {
             SelectableText(
               '系統編號（報給志工核對）：${order.id}',
               style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: () => context.push('/shop/orders/${order.id}'),
+              icon: const Icon(Icons.timeline),
+              label: const Text('查看配送進度', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+              style: FilledButton.styleFrom(
+                backgroundColor: ShopElderOrdersPage._green,
+                minimumSize: const Size.fromHeight(48),
+              ),
             ),
           ],
         ),

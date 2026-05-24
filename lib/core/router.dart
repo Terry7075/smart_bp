@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_bp/features/admin/presentation/admin_dashboard_page.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_page.dart';
+import 'package:smart_bp/features/family/presentation/family_home_page.dart';
+import 'package:smart_bp/features/shop/presentation/shop_order_detail_page.dart';
 import 'package:smart_bp/features/auth/login_page.dart';
 import 'package:smart_bp/features/health_ocr/health_scan_page.dart';
 import 'package:smart_bp/features/home/presentation/home_page.dart';
@@ -12,6 +15,9 @@ import 'package:smart_bp/features/profile/profile_page.dart';
 import 'package:smart_bp/features/profile/profile_provider.dart';
 import 'package:smart_bp/features/shop/presentation/shop_route_page.dart';
 import 'package:smart_bp/features/shop/presentation/shop_elder_orders_page.dart';
+import 'package:smart_bp/features/assistant/presentation/assistant_chat_history_page.dart';
+import 'package:smart_bp/features/shop/presentation/shop_demand_input_page.dart';
+import 'package:smart_bp/features/shop/presentation/shop_price_page.dart';
 import 'package:smart_bp/features/volunteer/volunteer_dashboard.dart';
 import 'package:smart_bp/features/volunteer/volunteer_shop_orders_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -95,6 +101,13 @@ GoRouter get appRouter =>
           builder: (context, state) => const AssistantPage(),
         ),
         GoRoute(
+          path: '/assistant/history',
+          builder: (context, state) {
+            final sid = state.uri.queryParameters['sessionId'];
+            return AssistantChatHistoryPage(sessionId: sid);
+          },
+        ),
+        GoRoute(
           path: '/volunteer-dashboard',
           builder: (context, state) => const VolunteerDashboard(),
         ),
@@ -103,8 +116,31 @@ GoRouter get appRouter =>
           builder: (context, state) => const ShopRoutePage(),
         ),
         GoRoute(
+          path: '/shop/demand-input',
+          builder: (context, state) => const ShopDemandInputPage(),
+        ),
+        GoRoute(
+          path: '/shop/prices',
+          builder: (context, state) => const ShopPricePage(),
+        ),
+        GoRoute(
           path: '/shop/orders',
           builder: (context, state) => const ShopElderOrdersPage(),
+        ),
+        GoRoute(
+          path: '/shop/orders/:orderId',
+          builder: (context, state) {
+            final id = state.pathParameters['orderId'] ?? '';
+            return ShopOrderDetailPage(orderId: id);
+          },
+        ),
+        GoRoute(
+          path: '/family/home',
+          builder: (context, state) => const FamilyHomePage(),
+        ),
+        GoRoute(
+          path: '/admin/dashboard',
+          builder: (context, state) => const AdminDashboardPage(),
         ),
         GoRoute(
           path: '/volunteer/shop-orders',
@@ -163,9 +199,12 @@ class _RoleDecisionPageState extends ConsumerState<_RoleDecisionPage> {
     if (async.hasError) return;
 
     final profile = async.value;
-    final target = (profile?.isVolunteer ?? false)
-        ? '/volunteer-dashboard'
-        : '/home';
+    final target = switch (profile?.role) {
+      Profile.kRoleVolunteer => '/volunteer-dashboard',
+      Profile.kRoleFamily => '/family/home',
+      Profile.kRoleAdmin => '/admin/dashboard',
+      _ => '/home',
+    };
 
     _navigated = true;
     // 用 post-frame 跳轉，確保不會在 build/listen 同步階段觸發 navigation。

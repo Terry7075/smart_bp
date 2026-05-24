@@ -621,6 +621,18 @@ class _MessageBubble extends ConsumerWidget {
                     color: fg,
                   ),
                 ),
+                if (message.intentLabel != null &&
+                    message.intentLabel!.trim().isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '意圖：${message.intentLabel}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: fg.withValues(alpha: 0.85),
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
                 if (actionsEnabled &&
                     !isUser &&
                     message.actions.isNotEmpty) ...[

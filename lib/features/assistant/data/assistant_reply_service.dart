@@ -3,6 +3,7 @@ import 'package:smart_bp/features/assistant/domain/assistant_nav_action.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_reply.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_snapshot.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
+import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task.dart';
 
 /// 依關鍵字與 [AssistantSnapshot] 產生回覆（不呼叫外部 AI）。
@@ -280,8 +281,23 @@ class AssistantReplyService {
 
     final buffer = StringBuffer('最近代購（$when）\n狀態：$status');
     if (items.isNotEmpty) buffer.writeln('\n品項：$items');
+    final lastEvent = latest.deliveryEvents.isNotEmpty
+        ? latest.deliveryEvents.last
+        : null;
+    if (lastEvent != null) {
+      buffer.writeln(
+        '\n配送：${ShopOrderStatus.eventTypeLabel(lastEvent.eventType)}',
+      );
+      if (lastEvent.note != null && lastEvent.note!.trim().isNotEmpty) {
+        buffer.writeln('（${lastEvent.note}）');
+      }
+    }
+    buffer.writeln('\n（資料來自系統，非猜測）');
+    if (s.loadedAt != null) {
+      buffer.writeln('（更新：${_formatDateTime(s.loadedAt!)}）');
+    }
     if (orders.length > 1) {
-      buffer.writeln('\n共有 ${orders.length} 筆近期紀錄。');
+      buffer.writeln('共有 ${orders.length} 筆近期紀錄。');
     }
     return buffer.toString();
   }
@@ -310,6 +326,12 @@ class AssistantReplyService {
     final l = t.toLocal();
     String p2(int n) => n.toString().padLeft(2, '0');
     return '${l.year}/${p2(l.month)}/${p2(l.day)}';
+  }
+
+  static String _formatDateTime(DateTime t) {
+    final l = t.toLocal();
+    String p2(int n) => n.toString().padLeft(2, '0');
+    return '${l.year}/${p2(l.month)}/${p2(l.day)} ${p2(l.hour)}:${p2(l.minute)}';
   }
 }
 

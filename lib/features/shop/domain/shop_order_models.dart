@@ -1,3 +1,31 @@
+/// 配送時間軸一筆事件（`order_delivery_events`）。
+final class OrderDeliveryEvent {
+  const OrderDeliveryEvent({
+    required this.id,
+    required this.orderId,
+    required this.eventType,
+    this.note,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String orderId;
+  final String eventType;
+  final String? note;
+  final DateTime createdAt;
+
+  factory OrderDeliveryEvent.fromMap(Map<String, dynamic> map) {
+    return OrderDeliveryEvent(
+      id: map['id']?.toString() ?? '',
+      orderId: map['order_id']?.toString() ?? '',
+      eventType: map['event_type']?.toString() ?? '',
+      note: map['note']?.toString(),
+      createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
 /// Demo：從 Supabase `orders` / `order_items` 讀回的一筆需求單（含明細）。
 final class ShopOrderListRow {
   const ShopOrderListRow({
@@ -10,6 +38,12 @@ final class ShopOrderListRow {
     this.elderDisplayName,
     this.elderPhone,
     this.totalAmount,
+    this.assignedVolunteerId,
+    this.deliveredAt,
+    this.deliveryIssue,
+    this.deliveryEvents = const [],
+    this.locationPointId,
+    this.locationPointName,
   });
 
   final String id;
@@ -18,6 +52,10 @@ final class ShopOrderListRow {
   final String? note;
   final DateTime createdAt;
   final List<ShopOrderItemRow> items;
+  final String? assignedVolunteerId;
+  final DateTime? deliveredAt;
+  final String? deliveryIssue;
+  final List<OrderDeliveryEvent> deliveryEvents;
 
   /// 若志工可讀 `profiles` 則為姓名，否則為 null（UI 改顯示編號）。
   final String? elderDisplayName;
@@ -28,8 +66,24 @@ final class ShopOrderListRow {
   /// 訂單參考總額（與 DB `total_amount` 一致，可為 null）。
   final int? totalAmount;
 
+  final String? locationPointId;
+  final String? locationPointName;
+
   int get totalQuantity =>
       items.fold<int>(0, (sum, e) => sum + e.quantity);
+
+  /// 時間軸顯示用：若尚無事件，至少顯示「已送出」。
+  List<OrderDeliveryEvent> get timelineEvents {
+    if (deliveryEvents.isNotEmpty) return deliveryEvents;
+    return [
+      OrderDeliveryEvent(
+        id: '',
+        orderId: id,
+        eventType: 'created',
+        createdAt: createdAt,
+      ),
+    ];
+  }
 }
 
 final class ShopOrderItemRow {
@@ -44,4 +98,17 @@ final class ShopOrderItemRow {
   final String productName;
   final int quantity;
   final double? unitPrice;
+}
+
+/// 長輩歷史訂單加總後的常購提示（非 ML 推薦）。
+final class FrequentShopItem {
+  const FrequentShopItem({
+    required this.productId,
+    required this.productName,
+    required this.totalQuantity,
+  });
+
+  final String productId;
+  final String productName;
+  final int totalQuantity;
 }
