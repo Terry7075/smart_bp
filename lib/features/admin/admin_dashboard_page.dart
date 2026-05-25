@@ -3,15 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/providers.dart';
-import '../../models/ride_status.dart';
 
 class AdminDashboardPage extends ConsumerWidget {
   const AdminDashboardPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final pendingDrivers = ref.watch(pendingDriverApplicationsProvider);
-    final rides = ref.watch(todayRidesProvider);
+    final stats = ref.watch(adminDashboardStatsProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -29,14 +27,8 @@ class AdminDashboardPage extends ConsumerWidget {
       ),
       body: Padding(
         padding: const EdgeInsets.all(20),
-        child: rides.when(
-          data: (items) {
-            final pendingCount = items.where((r) => r.status == RideStatus.pending).length;
-            final matchedCount = items.where((r) => r.status == RideStatus.matched).length;
-            final inProgressCount = items.where((r) =>
-                r.status == RideStatus.pickedUp || r.status == RideStatus.onTheWay).length;
-            final pendingDriverCount = pendingDrivers.value?.length ?? 0;
-
+        child: stats.when(
+          data: (item) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -44,16 +36,24 @@ class AdminDashboardPage extends ConsumerWidget {
                   spacing: 12,
                   runSpacing: 12,
                   children: [
-                    _MetricCard(label: '今日待媒合', value: pendingCount),
-                    _MetricCard(label: '今日已媒合', value: matchedCount),
-                    _MetricCard(label: '進行中接送', value: inProgressCount),
-                    _MetricCard(label: '待審核司機', value: pendingDriverCount),
+                    _MetricCard(label: '待媒合接送', value: item.pendingRideCount),
+                    _MetricCard(label: '今日行程', value: item.todayRideCount),
+                    _MetricCard(label: '今日已媒合', value: item.todayMatchedCount),
+                    _MetricCard(label: '進行中接送', value: item.inProgressCount),
+                    _MetricCard(label: '待審核司機', value: item.pendingDriverCount),
+                    _MetricCard(
+                        label: '待審長期接送', value: item.pendingStandingRideCount),
                   ],
                 ),
                 const SizedBox(height: 24),
                 FilledButton(
                   onPressed: () => context.push('/admin/drivers'),
                   child: const Text('司機審核'),
+                ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: () => context.push('/admin/standing'),
+                  child: const Text('長期接送審核'),
                 ),
                 const SizedBox(height: 12),
                 FilledButton(

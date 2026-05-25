@@ -37,13 +37,15 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     if (shouldSignOut != true || !mounted) return;
 
     setState(() => _signingOut = true);
+    final authService = ref.read(authServiceProvider);
     try {
-      await ref.read(authServiceProvider).signOut();
+      await authService.signOut();
+      if (!mounted) return;
       ref.invalidate(currentProfileProvider);
       ref.invalidate(currentDriverApplicationProvider);
       ref.invalidate(myRideRequestsProvider);
       ref.invalidate(myNotificationsProvider);
-      if (mounted) context.go('/login');
+      context.go('/login');
     } finally {
       if (mounted) setState(() => _signingOut = false);
     }

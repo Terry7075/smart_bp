@@ -50,7 +50,7 @@ class _MatchCard extends ConsumerStatefulWidget {
 }
 
 class _MatchCardState extends ConsumerState<_MatchCard> {
-  Driver? _selectedDriver;
+  String? _selectedDriverId;
   final _distanceController = TextEditingController();
   var _saving = false;
 
@@ -61,21 +61,38 @@ class _MatchCardState extends ConsumerState<_MatchCard> {
   }
 
   Future<void> _match() async {
-    final driver = _selectedDriver;
+    final driverId = _selectedDriverId;
     final distance = num.tryParse(_distanceController.text);
-    if (driver == null || distance == null) return;
+    final canUseDriver = driverId != null &&
+        widget.drivers.any((driver) =>
+            driver.id == driverId &&
+            driver.maxPassengers >= widget.ride.passengerCount);
+    if (!canUseDriver || distance == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('請選擇司機並輸入距離')),
+      );
+      return;
+    }
 
     setState(() => _saving = true);
     try {
       await ref.read(rideServiceProvider).manualMatchRide(
             rideRequestId: widget.ride.id,
-            driverId: driver.id,
+            driverId: driverId,
             distanceKm: distance,
           );
       ref.invalidate(pendingRideRequestsProvider);
+      ref.invalidate(adminRideRequestsProvider);
+      ref.invalidate(adminDashboardStatsProvider);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('媒合成功')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('媒合失敗：$error')),
         );
       }
     } finally {
@@ -86,6 +103,13 @@ class _MatchCardState extends ConsumerState<_MatchCard> {
   @override
   Widget build(BuildContext context) {
     final previewDistance = num.tryParse(_distanceController.text);
+    final candidates = widget.drivers
+        .where((driver) => driver.maxPassengers >= widget.ride.passengerCount)
+        .toList();
+    final selectedDriverId =
+        candidates.any((driver) => driver.id == _selectedDriverId)
+            ? _selectedDriverId
+            : null;
 
     return Card(
       child: Padding(
@@ -93,23 +117,32 @@ class _MatchCardState extends ConsumerState<_MatchCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.ride.displayDestination, style: Theme.of(context).textTheme.titleMedium),
+            Text(widget.ride.displayDestination,
+                style: Theme.of(context).textTheme.titleMedium),
             Text('日期：${DateFormat('yyyy/MM/dd').format(widget.ride.rideDate)}'),
             Text('時間：${widget.ride.rideTime.substring(0, 5)}'),
             Text('人數：${widget.ride.passengerCount}'),
             const SizedBox(height: 12),
-            DropdownButtonFormField<Driver>(
-              initialValue: _selectedDriver,
+            DropdownButtonFormField<String>(
+              initialValue: selectedDriverId,
               decoration: const InputDecoration(labelText: '指定司機'),
-              items: widget.drivers
-                  .where((driver) => driver.maxPassengers >= widget.ride.passengerCount)
+              items: candidates
                   .map((driver) => DropdownMenuItem(
-                        value: driver,
-                        child: Text('${driver.name}（${driver.maxPassengers} 人）'),
+                        value: driver.id,
+                        child:
+                            Text('${driver.name}（${driver.maxPassengers} 人）'),
                       ))
                   .toList(),
-              onChanged: (value) => setState(() => _selectedDriver = value),
+              onChanged: (value) => setState(() => _selectedDriverId = value),
             ),
+            if (candidates.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  '沒有可載 ${widget.ride.passengerCount} 人的已核准司機',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
             const SizedBox(height: 12),
             TextField(
               controller: _distanceController,
@@ -124,7 +157,7 @@ class _MatchCardState extends ConsumerState<_MatchCard> {
               ),
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: _saving ? null : _match,
+              onPressed: _saving || candidates.isEmpty ? null : _match,
               child: Text(_saving ? '媒合中...' : '建立媒合'),
             ),
           ],

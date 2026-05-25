@@ -102,6 +102,12 @@ class _DriverHomePageState extends ConsumerState<DriverHomePage> {
                     icon: const Icon(Icons.search),
                     label: const Text('查看可接任務'),
                   ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: () => context.push('/driver/standing/create'),
+                    icon: const Icon(Icons.event_available),
+                    label: const Text('刊登長期接送'),
+                  ),
                 ],
               ),
       ),

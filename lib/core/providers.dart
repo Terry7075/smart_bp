@@ -2,12 +2,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_notification.dart';
+import '../models/admin_dashboard_stats.dart';
 import '../models/driver.dart';
 import '../models/driver_location.dart';
+import '../models/driver_standing_ride_offer.dart';
 import '../models/profile.dart';
 import '../models/ride_feedback.dart';
 import '../models/ride_match.dart';
 import '../models/ride_request.dart';
+import '../models/standing_ride_request.dart';
 import '../services/auth_service.dart';
 import '../services/driver_service.dart';
 import '../services/driver_action_service.dart';
@@ -16,12 +19,17 @@ import '../services/location_tracking_service.dart';
 import '../services/notification_service.dart';
 import '../services/profile_service.dart';
 import '../services/ride_service.dart';
+import '../services/standing_ride_service.dart';
 
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
-final profileServiceProvider = Provider<ProfileService>((ref) => ProfileService());
+final profileServiceProvider =
+    Provider<ProfileService>((ref) => ProfileService());
 final driverServiceProvider = Provider<DriverService>((ref) => DriverService());
 final rideServiceProvider = Provider<RideService>((ref) => RideService());
-final feedbackServiceProvider = Provider<FeedbackService>((ref) => FeedbackService());
+final standingRideServiceProvider =
+    Provider<StandingRideService>((ref) => StandingRideService());
+final feedbackServiceProvider =
+    Provider<FeedbackService>((ref) => FeedbackService());
 final driverActionServiceProvider =
     Provider<DriverActionService>((ref) => DriverActionService());
 final locationTrackingServiceProvider =
@@ -55,17 +63,113 @@ final pendingRideRequestsProvider = StreamProvider<List<RideRequest>>(
   (ref) => ref.watch(rideServiceProvider).watchPendingRideRequests(),
 );
 
+final adminRideRequestsProvider = StreamProvider<List<RideRequest>>(
+  (ref) => ref.watch(rideServiceProvider).watchAdminRideRequests(),
+);
+
 final pendingDriverApplicationsProvider = StreamProvider<List<Driver>>(
   (ref) => ref.watch(driverServiceProvider).watchPendingApplications(),
 );
 
-final approvedDriversProvider = FutureProvider<List<Driver>>(
-  (ref) => ref.watch(driverServiceProvider).fetchApprovedDrivers(),
+final approvedDriversProvider = StreamProvider<List<Driver>>(
+  (ref) => ref.watch(driverServiceProvider).watchApprovedDrivers(),
 );
 
 final todayRidesProvider = StreamProvider<List<RideRequest>>(
   (ref) => ref.watch(rideServiceProvider).watchTodayRides(),
 );
+
+final myStandingRideRequestsProvider =
+    StreamProvider<List<StandingRideRequest>>(
+  (ref) => ref.watch(standingRideServiceProvider).watchMyStandingRideRequests(),
+);
+
+final adminStandingRideRequestsProvider =
+    StreamProvider<List<StandingRideRequest>>(
+  (ref) =>
+      ref.watch(standingRideServiceProvider).watchAdminStandingRideRequests(),
+);
+
+final pendingStandingRideRequestsProvider =
+    StreamProvider<List<StandingRideRequest>>(
+  (ref) =>
+      ref.watch(standingRideServiceProvider).watchPendingStandingRideRequests(),
+);
+
+final approvedDriverStandingRideOffersProvider =
+    StreamProvider<List<DriverStandingRideOffer>>(
+  (ref) => ref
+      .watch(standingRideServiceProvider)
+      .watchApprovedDriverStandingRideOffers(),
+);
+
+final myDriverStandingRideOffersProvider =
+    StreamProvider<List<DriverStandingRideOffer>>(
+  (ref) =>
+      ref.watch(standingRideServiceProvider).watchMyDriverStandingRideOffers(),
+);
+
+final adminDriverStandingRideOffersProvider =
+    StreamProvider<List<DriverStandingRideOffer>>(
+  (ref) => ref
+      .watch(standingRideServiceProvider)
+      .watchAdminDriverStandingRideOffers(),
+);
+
+final pendingDriverStandingRideOffersProvider =
+    StreamProvider<List<DriverStandingRideOffer>>(
+  (ref) => ref
+      .watch(standingRideServiceProvider)
+      .watchPendingDriverStandingRideOffers(),
+);
+
+final adminDashboardStatsProvider =
+    Provider<AsyncValue<AdminDashboardStats>>((ref) {
+  final rides = ref.watch(adminRideRequestsProvider);
+  final pendingDrivers = ref.watch(pendingDriverApplicationsProvider);
+  final pendingStandingRideRequests =
+      ref.watch(pendingStandingRideRequestsProvider);
+  final pendingStandingRideOffers =
+      ref.watch(pendingDriverStandingRideOffersProvider);
+
+  if (rides.hasError) {
+    return AsyncValue.error(rides.error!, rides.stackTrace!);
+  }
+  if (pendingDrivers.hasError) {
+    return AsyncValue.error(pendingDrivers.error!, pendingDrivers.stackTrace!);
+  }
+  if (pendingStandingRideRequests.hasError) {
+    return AsyncValue.error(
+      pendingStandingRideRequests.error!,
+      pendingStandingRideRequests.stackTrace!,
+    );
+  }
+  if (pendingStandingRideOffers.hasError) {
+    return AsyncValue.error(
+      pendingStandingRideOffers.error!,
+      pendingStandingRideOffers.stackTrace!,
+    );
+  }
+  if (rides.isLoading ||
+      pendingDrivers.isLoading ||
+      pendingStandingRideRequests.isLoading ||
+      pendingStandingRideOffers.isLoading) {
+    return const AsyncValue.loading();
+  }
+
+  final pendingStandingRideCount =
+      (pendingStandingRideRequests.value?.length ?? 0) +
+          (pendingStandingRideOffers.value?.length ?? 0);
+
+  return AsyncValue.data(
+    AdminDashboardStats.fromRides(
+      rides: rides.value ?? const [],
+      today: DateTime.now(),
+      pendingDriverCount: pendingDrivers.value?.length ?? 0,
+      pendingStandingRideCount: pendingStandingRideCount,
+    ),
+  );
+});
 
 final driverMatchesProvider =
     StreamProvider.family<List<RideMatch>, String>((ref, driverId) {
@@ -74,7 +178,9 @@ final driverMatchesProvider =
 
 final driverLocationForRideProvider =
     StreamProvider.family<DriverLocation?, String>((ref, rideRequestId) {
-  return ref.watch(rideServiceProvider).watchDriverLocationForRide(rideRequestId);
+  return ref
+      .watch(rideServiceProvider)
+      .watchDriverLocationForRide(rideRequestId);
 });
 
 final feedbackForRideProvider =

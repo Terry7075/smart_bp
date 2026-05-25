@@ -42,17 +42,20 @@ class _ProfileSetupPageState extends ConsumerState<ProfileSetupPage> {
             emergencyContactPhone: _emergencyPhoneController.text,
             emergencyContactRelation: _emergencyRelationController.text,
           );
+      if (!mounted) return;
       ref.invalidate(currentProfileProvider);
-      if (mounted) context.go('/');
+      context.go('/');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _signOut() async {
-    await ref.read(authServiceProvider).signOut();
+    final authService = ref.read(authServiceProvider);
+    await authService.signOut();
+    if (!mounted) return;
     ref.invalidate(currentProfileProvider);
-    if (mounted) context.go('/login');
+    context.go('/login');
   }
 
   @override

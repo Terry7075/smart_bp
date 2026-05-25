@@ -16,14 +16,20 @@ class DriverService {
         .from('drivers')
         .stream(primaryKey: ['id'])
         .eq('user_id', user.id)
-        .map((rows) => rows.isEmpty ? null : Driver.fromJson(Map<String, dynamic>.from(rows.first)));
+        .map((rows) => rows.isEmpty
+            ? null
+            : Driver.fromJson(Map<String, dynamic>.from(rows.first)));
   }
 
   Future<Driver?> fetchCurrentApplication() async {
     final user = _client.auth.currentUser;
     if (user == null) return null;
 
-    final row = await _client.from('drivers').select().eq('user_id', user.id).maybeSingle();
+    final row = await _client
+        .from('drivers')
+        .select()
+        .eq('user_id', user.id)
+        .maybeSingle();
     if (row == null) return null;
     return Driver.fromJson(Map<String, dynamic>.from(row));
   }
@@ -56,6 +62,19 @@ class DriverService {
         .stream(primaryKey: ['id'])
         .eq('approval_status', 'pending')
         .order('created_at')
+        .map(
+          (rows) => rows
+              .map((row) => Driver.fromJson(Map<String, dynamic>.from(row)))
+              .toList(),
+        );
+  }
+
+  Stream<List<Driver>> watchApprovedDrivers() {
+    return _client
+        .from('drivers')
+        .stream(primaryKey: ['id'])
+        .eq('approval_status', 'approved')
+        .order('name')
         .map(
           (rows) => rows
               .map((row) => Driver.fromJson(Map<String, dynamic>.from(row)))
