@@ -45,8 +45,7 @@ class ElderStandingRidesPage extends ConsumerWidget {
                   ? const _EmptyText('尚未選擇長期接送')
                   : Column(
                       children: items
-                          .map((request) =>
-                              _StandingRideCard(request: request))
+                          .map((request) => _StandingRideCard(request: request))
                           .toList(),
                     ),
               loading: () => const Center(child: CircularProgressIndicator()),

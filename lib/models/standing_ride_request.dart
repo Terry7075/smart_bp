@@ -9,7 +9,6 @@ class StandingRideRequest {
     required this.rideTime,
     required this.passengerCount,
     required this.needReturn,
-    required this.recurrencePattern,
     required this.serviceWeekdays,
     required this.startDate,
     required this.status,
@@ -38,7 +37,6 @@ class StandingRideRequest {
   final bool needReturn;
   final String? returnTime;
   final String? note;
-  final StandingRideRecurrencePattern recurrencePattern;
   final List<int> serviceWeekdays;
   final DateTime startDate;
   final DateTime? endDate;
@@ -49,17 +47,18 @@ class StandingRideRequest {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  String get displayDestination =>
-      customDestination?.trim().isNotEmpty == true ? customDestination! : destination;
+  String get displayDestination => customDestination?.trim().isNotEmpty == true
+      ? customDestination!
+      : destination;
   String get serviceWeekdaysLabel => formatServiceWeekdays(serviceWeekdays);
 
   factory StandingRideRequest.fromJson(Map<String, dynamic> json) {
-    final legacyPattern = json['recurrence_pattern'] as String? ?? 'daily';
     return StandingRideRequest(
       id: json['id'] as String,
       elderId: json['elder_id'] as String,
       driverId: json['driver_id'] as String?,
-      driverStandingRideOfferId: json['driver_standing_ride_offer_id'] as String?,
+      driverStandingRideOfferId:
+          json['driver_standing_ride_offer_id'] as String?,
       pickupLocation: json['pickup_location'] as String,
       destination: json['destination'] as String,
       customDestination: json['custom_destination'] as String?,
@@ -68,8 +67,7 @@ class StandingRideRequest {
       needReturn: json['need_return'] as bool,
       returnTime: json['return_time'] as String?,
       note: json['note'] as String?,
-      recurrencePattern: StandingRideRecurrencePatternX.fromDatabase(legacyPattern),
-      serviceWeekdays: _parseWeekdays(json['service_weekdays'], legacyPattern),
+      serviceWeekdays: parseServiceWeekdays(json['service_weekdays']),
       startDate: DateTime.parse(json['start_date'] as String),
       endDate: json['end_date'] == null
           ? null
@@ -83,21 +81,6 @@ class StandingRideRequest {
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
     );
-  }
-
-  static List<int> _parseWeekdays(Object? value, String legacyPattern) {
-    if (value != null) return parseServiceWeekdays(value);
-    return switch (legacyPattern) {
-      'daily' => isoWeekdays,
-      'weekdays' => const [
-          DateTime.monday,
-          DateTime.tuesday,
-          DateTime.wednesday,
-          DateTime.thursday,
-          DateTime.friday,
-        ],
-      _ => throw ArgumentError('Unknown standing ride recurrence pattern: $legacyPattern'),
-    };
   }
 }
 
@@ -129,30 +112,5 @@ extension StandingRideStatusX on StandingRideStatus {
         'rejected' => StandingRideStatus.rejected,
         'cancelled' => StandingRideStatus.cancelled,
         _ => throw ArgumentError('Unknown standing ride status: $value'),
-      };
-}
-
-enum StandingRideRecurrencePattern {
-  daily,
-  weekdays,
-}
-
-extension StandingRideRecurrencePatternX on StandingRideRecurrencePattern {
-  String get databaseValue => switch (this) {
-        StandingRideRecurrencePattern.daily => 'daily',
-        StandingRideRecurrencePattern.weekdays => 'weekdays',
-      };
-
-  String get label => switch (this) {
-        StandingRideRecurrencePattern.daily => '每天',
-        StandingRideRecurrencePattern.weekdays => '週一到週五',
-      };
-
-  static StandingRideRecurrencePattern fromDatabase(String value) =>
-      switch (value) {
-        'daily' => StandingRideRecurrencePattern.daily,
-        'weekdays' => StandingRideRecurrencePattern.weekdays,
-        _ => throw ArgumentError(
-            'Unknown standing ride recurrence pattern: $value'),
       };
 }

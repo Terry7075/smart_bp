@@ -84,18 +84,6 @@ final myStandingRideRequestsProvider =
   (ref) => ref.watch(standingRideServiceProvider).watchMyStandingRideRequests(),
 );
 
-final adminStandingRideRequestsProvider =
-    StreamProvider<List<StandingRideRequest>>(
-  (ref) =>
-      ref.watch(standingRideServiceProvider).watchAdminStandingRideRequests(),
-);
-
-final pendingStandingRideRequestsProvider =
-    StreamProvider<List<StandingRideRequest>>(
-  (ref) =>
-      ref.watch(standingRideServiceProvider).watchPendingStandingRideRequests(),
-);
-
 final approvedDriverStandingRideOffersProvider =
     StreamProvider<List<DriverStandingRideOffer>>(
   (ref) => ref
@@ -127,8 +115,6 @@ final adminDashboardStatsProvider =
     Provider<AsyncValue<AdminDashboardStats>>((ref) {
   final rides = ref.watch(adminRideRequestsProvider);
   final pendingDrivers = ref.watch(pendingDriverApplicationsProvider);
-  final pendingStandingRideRequests =
-      ref.watch(pendingStandingRideRequestsProvider);
   final pendingStandingRideOffers =
       ref.watch(pendingDriverStandingRideOffersProvider);
 
@@ -138,12 +124,6 @@ final adminDashboardStatsProvider =
   if (pendingDrivers.hasError) {
     return AsyncValue.error(pendingDrivers.error!, pendingDrivers.stackTrace!);
   }
-  if (pendingStandingRideRequests.hasError) {
-    return AsyncValue.error(
-      pendingStandingRideRequests.error!,
-      pendingStandingRideRequests.stackTrace!,
-    );
-  }
   if (pendingStandingRideOffers.hasError) {
     return AsyncValue.error(
       pendingStandingRideOffers.error!,
@@ -152,21 +132,16 @@ final adminDashboardStatsProvider =
   }
   if (rides.isLoading ||
       pendingDrivers.isLoading ||
-      pendingStandingRideRequests.isLoading ||
       pendingStandingRideOffers.isLoading) {
     return const AsyncValue.loading();
   }
-
-  final pendingStandingRideCount =
-      (pendingStandingRideRequests.value?.length ?? 0) +
-          (pendingStandingRideOffers.value?.length ?? 0);
 
   return AsyncValue.data(
     AdminDashboardStats.fromRides(
       rides: rides.value ?? const [],
       today: DateTime.now(),
       pendingDriverCount: pendingDrivers.value?.length ?? 0,
-      pendingStandingRideCount: pendingStandingRideCount,
+      pendingStandingRideCount: pendingStandingRideOffers.value?.length ?? 0,
     ),
   );
 });

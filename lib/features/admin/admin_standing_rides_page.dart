@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 
 import '../../core/providers.dart';
 import '../../models/driver_standing_ride_offer.dart';
-import '../../models/standing_ride_request.dart';
 
 enum _OfferFilter { pending, approved, rejected, booked, cancelled, all }
 
@@ -22,7 +21,6 @@ class _AdminStandingRidesPageState
 
   @override
   Widget build(BuildContext context) {
-    final requests = ref.watch(adminStandingRideRequestsProvider);
     final offers = ref.watch(adminDriverStandingRideOffersProvider);
 
     return Scaffold(
@@ -31,35 +29,12 @@ class _AdminStandingRidesPageState
         padding: const EdgeInsets.all(16),
         child: RefreshIndicator(
           onRefresh: () async {
-            ref.invalidate(adminStandingRideRequestsProvider);
             ref.invalidate(adminDriverStandingRideOffersProvider);
-            ref.invalidate(pendingStandingRideRequestsProvider);
             ref.invalidate(pendingDriverStandingRideOffersProvider);
           },
           child: ListView(
             children: [
-              Text('長者定期需求', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              requests.when(
-                data: (items) {
-                  final pending = items
-                      .where(
-                          (item) => item.status == StandingRideStatus.pending)
-                      .toList();
-                  if (pending.isEmpty) {
-                    return const _EmptyPanel('沒有待審的長者定期需求');
-                  }
-                  return Column(
-                    children: pending
-                        .map((request) => _AdminRequestCard(request: request))
-                        .toList(),
-                  );
-                },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (error, _) => _EmptyPanel('讀取長者需求失敗：$error'),
-              ),
-              const SizedBox(height: 24),
-              Text('司機可服務時段', style: Theme.of(context).textTheme.titleLarge),
+              Text('司機可服務方案', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -70,7 +45,7 @@ class _AdminStandingRidesPageState
                     ButtonSegment(
                         value: _OfferFilter.approved, label: Text('可選')),
                     ButtonSegment(
-                        value: _OfferFilter.booked, label: Text('已配')),
+                        value: _OfferFilter.booked, label: Text('已配對')),
                     ButtonSegment(
                         value: _OfferFilter.rejected, label: Text('退回')),
                     ButtonSegment(
@@ -87,7 +62,7 @@ class _AdminStandingRidesPageState
                 data: (items) {
                   final filtered = _filterOffers(items);
                   if (filtered.isEmpty) {
-                    return const _EmptyPanel('沒有符合條件的司機時段');
+                    return const _EmptyPanel('沒有符合條件的司機長期接送方案');
                   }
                   return Column(
                     children: filtered
@@ -96,7 +71,7 @@ class _AdminStandingRidesPageState
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
-                error: (error, _) => _EmptyPanel('讀取司機時段失敗：$error'),
+                error: (error, _) => _EmptyPanel('讀取司機方案失敗：$error'),
               ),
             ],
           ),
@@ -128,173 +103,6 @@ class _AdminStandingRidesPageState
           .toList(),
       _OfferFilter.all => items,
     };
-  }
-}
-
-class _AdminRequestCard extends ConsumerStatefulWidget {
-  const _AdminRequestCard({required this.request});
-
-  final StandingRideRequest request;
-
-  @override
-  ConsumerState<_AdminRequestCard> createState() => _AdminRequestCardState();
-}
-
-class _AdminRequestCardState extends ConsumerState<_AdminRequestCard> {
-  String? _busyAction;
-
-  Future<void> _run(String action, Future<void> Function() operation) async {
-    setState(() => _busyAction = action);
-    try {
-      await operation();
-      ref.invalidate(adminStandingRideRequestsProvider);
-      ref.invalidate(pendingStandingRideRequestsProvider);
-      ref.invalidate(adminDashboardStatsProvider);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_successMessage(action))),
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('操作失敗：$error')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busyAction = null);
-    }
-  }
-
-  Future<void> _reject() async {
-    final controller = TextEditingController();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('退回定期需求'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(labelText: '退回原因'),
-          maxLines: 3,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('退回'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    await _run(
-      'reject',
-      () => ref
-          .read(standingRideServiceProvider)
-          .rejectStandingRideRequest(widget.request.id, controller.text),
-    );
-  }
-
-  String _successMessage(String action) => switch (action) {
-        'approve' => '已核准定期需求並產生行程',
-        'reject' => '已退回定期需求',
-        'generate' => '已補產生未來行程',
-        'cancel' => '已取消定期需求',
-        _ => '已完成操作',
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    final request = widget.request;
-    final isBusy = _busyAction != null;
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    request.displayDestination,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                Chip(label: Text(request.status.label)),
-              ],
-            ),
-            Text('長者：${request.elderId.substring(0, 8)}'),
-            Text('上車：${request.pickupLocation}'),
-            Text('星期：${request.serviceWeekdaysLabel}'),
-            Text('時間：${request.rideTime.substring(0, 5)}'),
-            Text('人數：${request.passengerCount} 人'),
-            Text('開始：${DateFormat('yyyy/MM/dd').format(request.startDate)}'),
-            if (request.endDate != null)
-              Text('結束：${DateFormat('yyyy/MM/dd').format(request.endDate!)}'),
-            if (request.needReturn && request.returnTime != null)
-              Text('回程：${request.returnTime!.substring(0, 5)}'),
-            if (request.note != null) Text('備註：${request.note}'),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (request.status == StandingRideStatus.pending) ...[
-                  FilledButton.icon(
-                    onPressed: isBusy
-                        ? null
-                        : () => _run(
-                              'approve',
-                              () => ref
-                                  .read(standingRideServiceProvider)
-                                  .approveStandingRideRequest(request.id),
-                            ),
-                    icon: const Icon(Icons.check),
-                    label: Text(_busyAction == 'approve' ? '核准中...' : '核准'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: isBusy ? null : _reject,
-                    icon: const Icon(Icons.close),
-                    label: Text(_busyAction == 'reject' ? '退回中...' : '退回'),
-                  ),
-                ],
-                if (request.status == StandingRideStatus.approved) ...[
-                  OutlinedButton.icon(
-                    onPressed: isBusy
-                        ? null
-                        : () => _run(
-                              'generate',
-                              () async => ref
-                                  .read(standingRideServiceProvider)
-                                  .generateStandingRideRequests(request.id),
-                            ),
-                    icon: const Icon(Icons.event_repeat),
-                    label: Text(_busyAction == 'generate' ? '產生中...' : '補產生'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: isBusy
-                        ? null
-                        : () => _run(
-                              'cancel',
-                              () => ref
-                                  .read(standingRideServiceProvider)
-                                  .cancelStandingRideRequest(request.id),
-                            ),
-                    icon: const Icon(Icons.cancel),
-                    label: Text(_busyAction == 'cancel' ? '取消中...' : '取消'),
-                  ),
-                ],
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 

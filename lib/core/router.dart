@@ -8,7 +8,6 @@ import '../features/admin/admin_match_page.dart';
 import '../features/admin/admin_standing_rides_page.dart';
 import '../features/auth/login_page.dart';
 import '../features/auth/role_gate_page.dart';
-import '../features/elder/create_standing_ride_request_page.dart';
 import '../features/driver/driver_active_ride_page.dart';
 import '../features/driver/driver_application_page.dart';
 import '../features/driver/driver_available_requests_page.dart';
@@ -87,10 +86,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
           path: '/elder/standing',
           builder: (_, __) => const ElderStandingRidesPage()),
-      GoRoute(
-        path: '/elder/standing/create',
-        builder: (_, __) => const CreateStandingRideRequestPage(),
-      ),
       GoRoute(
           path: '/elder/history',
           builder: (_, __) => const ElderRideHistoryPage()),

@@ -18,7 +18,7 @@
 - Google OAuth 登入
 - 完成個人資料與緊急聯絡人設定
 - 建立一般接送需求
-- 建立定期接送需求
+- 選擇已核准的長期接送方案
 - 查看行程、歷史紀錄與行程明細
 - 查看司機 GPS 位置
 - 取消可取消狀態的行程
@@ -35,7 +35,7 @@
 - 上傳前景 GPS 位置
 - 一鍵撥打乘客電話
 - 開啟外部導航
-- 建立可服務的定期接送時段
+- 建立可服務的長期接送方案
 
 ### 管理員
 
@@ -46,8 +46,7 @@
 - 取消、改期、改派行程
 - 查看延誤與 GPS 中斷狀態
 - 查看未處理問題回報
-- 審核長者定期接送需求
-- 審核司機定期接送時段
+- 審核司機長期接送方案
 
 ## 技術棧
 
@@ -231,6 +230,7 @@ Supabase 專案也需要允許對應的 Android deep link callback。
 20260525005037_tighten_standing_ride_table_grants.sql
 20260525010838_tighten_ride_rpc_execute_grants.sql
 20260525010957_tighten_core_table_grants.sql
+20260525020222_remove_elder_standing_request_flow.sql
 ```
 
 ### 建立管理員
@@ -271,12 +271,12 @@ flutter build apk --release `
 - Google OAuth 登入會導向正確 Supabase project。
 - OAuth callback 回到 App。
 - 長者可建立一般接送需求。
-- 長者可建立定期接送需求。
+- 長者可選擇已核准的司機長期接送方案。
 - 司機可提出申請，管理員可核准。
 - 司機可接案並更新行程狀態。
 - 司機 GPS 位置會在長者/管理員端顯示。
 - 管理員可手動媒合、改期、改派與取消。
-- 管理員可審核長者定期需求與司機定期時段。
+- 管理員可審核司機長期接送方案。
 - 已完成行程可評分與回報問題。
 - release APK 可在實體 Android 或 emulator 安裝啟動。
 
