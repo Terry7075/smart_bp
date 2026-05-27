@@ -22,10 +22,16 @@ class _AssistantChatHistoryPageState extends ConsumerState<AssistantChatHistoryP
 
   String? _selectedId;
 
+  /// 手機模式下是否正在顯示詳情（false = 列表，true = 詳情）。
+  /// 平板 / 桌面（≥600px）時此值永遠不影響佈局。
+  bool _showingMobileDetail = false;
+
   @override
   void initState() {
     super.initState();
     _selectedId = widget.sessionId;
+    // 若透過 deep link 帶入 sessionId，手機上直接進入詳情
+    if (widget.sessionId != null) _showingMobileDetail = true;
   }
 
   static String _formatTime(DateTime t) {
@@ -51,7 +57,14 @@ class _AssistantChatHistoryPageState extends ConsumerState<AssistantChatHistoryP
           ),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back, size: 28),
-            onPressed: () => context.pop(),
+            onPressed: () {
+              // 手機詳情頁：返回列表；其他狀況：返回上一頁
+              if (_showingMobileDetail) {
+                setState(() => _showingMobileDetail = false);
+              } else {
+                context.pop();
+              }
+            },
           ),
         ),
         body: async.when(
@@ -70,36 +83,85 @@ class _AssistantChatHistoryPageState extends ConsumerState<AssistantChatHistoryP
               orElse: () => sessions.first,
             );
 
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 220,
-                  child: ListView(
-                    children: [
-                      for (final s in sessions)
-                        ListTile(
-                          selected: s.id == _selectedId,
-                          title: Text(
-                            s.title,
-                            style: const TextStyle(fontSize: 16),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final isMobile = constraints.maxWidth < 600;
+
+                if (isMobile) {
+                  // ── 手機：單欄佈局 ──────────────────────────────
+                  if (_showingMobileDetail) {
+                    // 詳情頁（全寬時間軸）
+                    return _TimelineView(session: selected);
+                  }
+                  // 列表頁（全寬 Session 清單）
+                  return ListView.separated(
+                    itemCount: sessions.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, idx) {
+                      final s = sessions[idx];
+                      return ListTile(
+                        selected: s.id == _selectedId,
+                        selectedTileColor: const Color(0xFFE8F5E9),
+                        minVerticalPadding: 14,
+                        title: Text(
+                          s.title,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
                           ),
-                          subtitle: Text(
-                            _formatTime(s.updatedAt),
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                          onTap: () => setState(() => _selectedId = s.id),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                    ],
-                  ),
-                ),
-                const VerticalDivider(width: 1),
-                Expanded(
-                  child: _TimelineView(session: selected),
-                ),
-              ],
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            _formatTime(s.updatedAt),
+                            style: const TextStyle(fontSize: 15),
+                          ),
+                        ),
+                        trailing: const Icon(Icons.chevron_right, size: 28),
+                        onTap: () => setState(() {
+                          _selectedId = s.id;
+                          _showingMobileDetail = true;
+                        }),
+                      );
+                    },
+                  );
+                }
+
+                // ── 平板 / 桌面：維持原始左右欄 Row 佈局 ──────────
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 220,
+                      child: ListView(
+                        children: [
+                          for (final s in sessions)
+                            ListTile(
+                              selected: s.id == _selectedId,
+                              title: Text(
+                                s.title,
+                                style: const TextStyle(fontSize: 16),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                _formatTime(s.updatedAt),
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                              onTap: () => setState(() => _selectedId = s.id),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(
+                      child: _TimelineView(session: selected),
+                    ),
+                  ],
+                );
+              },
             );
           },
         ),
