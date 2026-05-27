@@ -986,7 +986,18 @@ class _ShopProductImageState extends State<_ShopProductImage> {
     return 'http://127.0.0.1:8790';
   }
 
-  bool get _preferPxThumb => _usePxThumbFirst;
+  /// 若 API base 是 localhost / 127.x，手機實機無法連線。
+  /// 偵測到此情況時跳過所有 PX Thumb 請求，直接顯示 placeholder，
+  /// 避免「旋轉圈 → 失敗」的視覺卡頓。
+  static bool get _isLocalhostThumb {
+    final base = _thumbApiBase;
+    return base.startsWith('http://127.') ||
+        base.startsWith('http://localhost') ||
+        base.startsWith('https://localhost');
+  }
+
+  /// 僅在 SHOP_PX_THUMB=true 且 API 不是 localhost 時才優先走全聯縮圖。
+  bool get _preferPxThumb => _usePxThumbFirst && !_isLocalhostThumb;
 
   String? _url;
   bool _loadingPx = false;
@@ -1046,7 +1057,8 @@ class _ShopProductImageState extends State<_ShopProductImage> {
   }
 
   Future<void> _loadPxThumbAfterSeedFailed() async {
-    if (_thumbApiBase.isEmpty || _pxFetchStarted) return;
+    // 手機 Demo：API 是 localhost 就直接顯示占位圖，不卡旋轉圈
+    if (_isLocalhostThumb || _thumbApiBase.isEmpty || _pxFetchStarted) return;
     _pxFetchStarted = true;
     if (!mounted) return;
     setState(() {
