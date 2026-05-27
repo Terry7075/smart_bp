@@ -1,15 +1,21 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_bp/features/assistant/data/assistant_shop_action_service.dart';
+import 'package:smart_bp/features/assistant/presentation/assistant_tts_provider.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_voice_provider.dart';
 import 'package:smart_bp/features/assistant/presentation/widgets/assistant_voice_live_panel.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
+import 'package:smart_bp/features/shared/offline_queue/offline_queue.dart';
 import 'package:smart_bp/features/shop/data/px_mart_links.dart';
+import 'package:smart_bp/shared/debug/realtime_latency_tracker.dart';
 import 'package:smart_bp/features/shop/data/shop_manual_voice_parser.dart';
 import 'package:smart_bp/features/shop/domain/shop_product.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// 自助商品：語音＋字幕＋一句話（全聯搜尋關鍵字），人性化單欄填寫。
+/// 自助商品：語音＋字幕＋多品項拆分，人性化單欄填寫。
 class ShopManualVoiceSection extends ConsumerStatefulWidget {
   const ShopManualVoiceSection({
     super.key,
@@ -28,18 +34,26 @@ class ShopManualVoiceSection extends ConsumerStatefulWidget {
 class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection> {
   final _text = TextEditingController();
 
+  /// 待確認的解析結果（多品項），null = 尚未解析。
+  List<ParsedManualVoiceItem>? _pendingItems;
+
   @override
   void dispose() {
     _text.dispose();
     super.dispose();
   }
 
-  ParsedManualVoiceItem? _parseCurrent() {
-    final fromText = ShopManualVoiceParser.parse(_text.text);
-    if (fromText.isValid) return fromText;
-    final live = ref.read(assistantVoiceProvider).liveText.trim();
-    if (live.isEmpty) return null;
-    return ShopManualVoiceParser.parse(live);
+  /// 解析輸入（優先用文字欄，再用語音即時文字）。
+  List<ParsedManualVoiceItem> _parseAll(String? override) {
+    final src = override?.trim().isNotEmpty == true
+        ? override!.trim()
+        : _text.text.trim();
+    if (src.isEmpty) {
+      final live = ref.read(assistantVoiceProvider).liveText.trim();
+      if (live.isEmpty) return [];
+      return ShopManualVoiceParser.parseMany(live);
+    }
+    return ShopManualVoiceParser.parseMany(src);
   }
 
   ShopProduct _productFrom(ParsedManualVoiceItem p) {
@@ -55,32 +69,99 @@ class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection>
     );
   }
 
-  Future<void> _syncDemandDraft(ParsedManualVoiceItem p) async {
+  Future<void> _syncDemandDraft(List<ParsedManualVoiceItem> items) async {
     final uid = ref.read(authProvider)?.user.id;
     if (uid == null) return;
     try {
       await ref.read(demandRecordsRepositoryProvider).addLines(
             userId: uid,
-            lines: [
-              (
-                productName: p.displayName,
-                quantity: p.quantity,
-                productId: null,
-                unitPrice: null,
-              ),
-            ],
+            lines: items
+                .map(
+                  (p) => (
+                    productName: p.displayName,
+                    quantity: p.quantity,
+                    productId: null,
+                    unitPrice: null,
+                  ),
+                )
+                .toList(),
           );
-    } catch (_) {
-      // 表未建時仍可在本站清單送出
+    } catch (e) {
+      // 網路或 DB 失敗 → 寫入離線佇列，網路恢復後自動重送
+      if (kDebugMode) debugPrint('[ShopVoice] Supabase failed, enqueuing: $e');
+      for (final p in items) {
+        await OfflineQueue.instance.enqueue(
+          userId: uid,
+          productName: p.displayName,
+          quantity: p.quantity,
+        );
+      }
+      // 顯示離線提示給使用者
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Color(0xFFE65100),
+            duration: Duration(seconds: 5),
+            content: Text(
+              '目前無法連線，已離線暫存，網路恢復後自動送出',
+              style: TextStyle(fontSize: 17),
+            ),
+          ),
+        );
+      }
     }
   }
 
-  Future<void> _commit({required bool openPx, String? rawOverride}) async {
-    if (rawOverride != null && rawOverride.trim().isNotEmpty) {
-      _text.text = rawOverride.trim();
+  /// 使用者按下「確認加入」。
+  Future<void> _confirmItems({required bool openPx}) async {
+    final items = _pendingItems;
+    if (items == null || items.isEmpty) return;
+
+    // 記錄送出時間（Realtime 延遲量測起點）
+    ref.read(realtimeLatencyProvider.notifier).markSent();
+
+    await _syncDemandDraft(items);
+
+    for (final p in items) {
+      widget.onItemAdded(_productFrom(p), p.quantity);
     }
-    final p = _parseCurrent();
-    if (p == null) {
+
+    if (openPx && items.isNotEmpty) {
+      final first = items.first;
+      await launchUrl(
+        buildPxMartSearchResultUri(_productFrom(first)),
+        mode: LaunchMode.externalApplication,
+      );
+    }
+
+    _text.clear();
+    await ref.read(assistantVoiceProvider.notifier).cancelListening();
+    if (!mounted) return;
+
+    final nameList = items.map((p) => p.displayName).join('、');
+    final ttsMsg = openPx
+        ? '已加入$nameList，並開啟全聯搜尋給您對照'
+        : '已加入$nameList，志工端會看到這些需求';
+    unawaited(ref.read(assistantTtsProvider.notifier).speak(ttsMsg));
+
+    setState(() => _pendingItems = null);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          openPx
+              ? '已加入「$nameList」，並開啟全聯搜尋給您對照'
+              : '已加入「$nameList」，志工端會看到這些需求',
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  /// 語音或文字輸入完成後進入確認預覽。
+  void _preview(String? override) {
+    final items = _parseAll(override);
+    if (items.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -89,56 +170,39 @@ class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection>
       );
       return;
     }
-
-    await _syncDemandDraft(p);
-    final product = _productFrom(p);
-    widget.onItemAdded(product, p.quantity);
-
-    if (openPx) {
-      await launchUrl(
-        buildPxMartSearchResultUri(product),
-        mode: LaunchMode.externalApplication,
-      );
-    }
-
-    _text.clear();
-    await ref.read(assistantVoiceProvider.notifier).cancelListening();
-    if (!mounted) return;
-    setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          openPx
-              ? '已加入「${p.displayName}」，並開啟全聯搜尋給您對照'
-              : '已加入「${p.displayName}」，志工端會看到這筆需求',
-        ),
-        duration: const Duration(seconds: 4),
-      ),
-    );
+    setState(() => _pendingItems = items);
   }
 
   @override
   Widget build(BuildContext context) {
     final voice = ref.watch(assistantVoiceProvider);
     final listening = voice.isListening;
-    final parsed = _parseCurrent();
+    final pending = _pendingItems;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
           '跟志工說想買什麼就好，不用分品牌、價格。\n'
-          '例如按住麥克風說：「全聯的鮮奶兩罐」',
+          '例如按住麥克風說：「全聯的鮮奶兩罐，衛生紙一包」',
           style: TextStyle(fontSize: 17, height: 1.45, color: Colors.grey.shade800),
         ),
         const SizedBox(height: 12),
+
+        // ── 語音即時字幕面板 ──────────────────────────────
         if (listening)
           AssistantVoiceLivePanel(
-            onConfirm: () => _commit(openPx: false),
+            onConfirm: () {
+              final said = ref.read(assistantVoiceProvider).liveText;
+              ref.read(assistantVoiceProvider.notifier).cancelListening();
+              _preview(said);
+            },
             onCancel: () =>
                 ref.read(assistantVoiceProvider.notifier).cancelListening(),
           ),
-        if (!listening) ...[
+
+        // ── 文字輸入 + 按住說話 ───────────────────────────
+        if (!listening && pending == null) ...[
           TextField(
             controller: _text,
             style: const TextStyle(fontSize: 20),
@@ -146,7 +210,7 @@ class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection>
             maxLines: 3,
             onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
-              hintText: '也可以直接打字：全聯衛生紙一包',
+              hintText: '也可直接打字：鮮奶兩罐、衛生紙一包',
               hintStyle: TextStyle(fontSize: 18, color: Colors.grey.shade600),
               filled: true,
               fillColor: Colors.white,
@@ -157,6 +221,8 @@ class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection>
           const SizedBox(height: 12),
           Listener(
             onPointerDown: (_) async {
+              // 收音前停止 TTS 避免回音
+              await ref.read(assistantTtsProvider.notifier).stop();
               await ref.read(assistantVoiceProvider.notifier).ensureInitialized();
               if (!ref.read(assistantVoiceProvider).isListening) {
                 await ref.read(assistantVoiceProvider.notifier).toggleListening();
@@ -168,13 +234,13 @@ class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection>
                   .read(assistantVoiceProvider.notifier)
                   .finishListening();
               if (!mounted) return;
-              await _commit(openPx: false, rawOverride: said);
+              _preview(said);
             },
             child: FilledButton.icon(
               onPressed: null,
               icon: const Icon(Icons.mic, size: 30),
               label: const Text(
-                '按住說話（會顯示字幕）',
+                '按住說話（可說多品項）',
                 style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
               ),
               style: FilledButton.styleFrom(
@@ -185,16 +251,71 @@ class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection>
               ),
             ),
           ),
+          if (_text.text.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: () => _preview(null),
+              icon: const Icon(Icons.search, size: 24),
+              label: const Text('預覽品項', style: TextStyle(fontSize: 17)),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF1565C0),
+                minimumSize: const Size(double.infinity, 48),
+              ),
+            ),
+          ],
         ],
-        if (!listening) ...[
+
+        // ── 多品項確認面板 ────────────────────────────────
+        if (pending != null) ...[
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F5E9),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFF2E7D32), width: 1.5),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '確認以下品項？',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1B5E20),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...pending.map(
+                  (p) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.shopping_cart_outlined,
+                            size: 22, color: Color(0xFF2E7D32)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${p.displayName}（全聯找：${p.pxSearchKeyword}）',
+                            style: const TextStyle(fontSize: 17),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: () => _commit(openPx: false),
+                  onPressed: () => _confirmItems(openPx: false),
                   icon: const Icon(Icons.check_circle_outline, size: 26),
-                  label: const Text('加入需求', style: TextStyle(fontSize: 18)),
+                  label: const Text('確認加入', style: TextStyle(fontSize: 18)),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF2E7D32),
                     minimumSize: const Size(0, 52),
@@ -204,27 +325,19 @@ class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection>
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => _commit(openPx: true),
+                  onPressed: () => _confirmItems(openPx: true),
                   icon: const Icon(Icons.travel_explore, size: 24),
-                  label: const Text('全聯找', style: TextStyle(fontSize: 17)),
+                  label: const Text('加入＋全聯找', style: TextStyle(fontSize: 16)),
                   style: OutlinedButton.styleFrom(minimumSize: const Size(0, 52)),
                 ),
               ),
             ],
           ),
-        ],
-        if (parsed != null && !listening) ...[
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE8F5E9),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              '志工會看到：${parsed.displayName}\n全聯搜尋：${parsed.pxSearchKeyword}',
-              style: const TextStyle(fontSize: 17, height: 1.4),
-            ),
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: () => setState(() => _pendingItems = null),
+            icon: const Icon(Icons.undo, size: 20),
+            label: const Text('重新輸入', style: TextStyle(fontSize: 16)),
           ),
         ],
       ],

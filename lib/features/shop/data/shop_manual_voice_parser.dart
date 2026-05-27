@@ -1,5 +1,18 @@
-/// 將長輩口語（含「全聯的鮮奶兩罐」）解析成單一品項描述，供志工採買。
+/// 將長輩口語（含「全聯的鮮奶兩罐，衛生紙一包」）解析成品項清單，供志工採買。
 abstract final class ShopManualVoiceParser {
+  /// 分隔詞：逗號、頓號、「然後」、「還有」、「以及」、「和」、「跟」等。
+  static final _separatorRe = RegExp(r'[,，、；;]\s*|然後|還有|以及|接下來');
+
+  /// 解析多品項（以分隔詞切割，每段呼叫 [parse]）。
+  /// 若輸入只有一品項也能正常運作。
+  static List<ParsedManualVoiceItem> parseMany(String raw) {
+    final segments = raw.trim().split(_separatorRe);
+    return segments
+        .map((s) => parse(s.trim()))
+        .where((p) => p.isValid)
+        .toList();
+  }
+
   static ParsedManualVoiceItem parse(String raw) {
     var t = raw.trim();
     if (t.isEmpty) {

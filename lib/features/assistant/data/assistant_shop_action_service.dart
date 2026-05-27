@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_nav_action.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_reply.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_shop_intent.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_snapshot.dart';
+import 'package:smart_bp/features/shared/offline_queue/offline_queue.dart';
 import 'package:smart_bp/features/shop/data/demand_records_repository.dart';
 import 'package:smart_bp/features/shop/data/price_references_repository.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
@@ -86,8 +88,17 @@ class AssistantShopActionService {
         actions: const [_navShop, _navShopOrders],
       );
     } catch (e) {
+      // 網路失敗 → 寫入離線佇列
+      if (kDebugMode) debugPrint('[Assistant] Supabase failed, enqueuing: $e');
+      for (final l in lines) {
+        await OfflineQueue.instance.enqueue(
+          userId: userId,
+          productName: l.productName,
+          quantity: l.quantity,
+        );
+      }
       return AssistantReply(
-        text: '暫時無法寫入需求紀錄，請稍後再試或到柑仔店手動選商品。\n（$e）',
+        text: '目前無法連線，已離線暫存您的需求。\n網路恢復後會自動送出，請放心。',
         actions: const [_navShop],
       );
     }

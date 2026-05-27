@@ -7,6 +7,7 @@ import 'package:smart_bp/features/assistant/domain/assistant_message.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_history_sidebar.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_history_provider.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_provider.dart';
+import 'package:smart_bp/features/assistant/presentation/assistant_tts_provider.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_voice_provider.dart';
 import 'package:smart_bp/features/assistant/presentation/widgets/assistant_voice_live_panel.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
@@ -42,6 +43,7 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
   @override
   void dispose() {
     ref.read(assistantVoiceProvider.notifier).cancelListening();
+    ref.read(assistantTtsProvider.notifier).stop();
     ref.read(assistantChatProvider.notifier).onPageDispose();
     _input.dispose();
     _scroll.dispose();
@@ -60,6 +62,8 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
   }
 
   Future<void> _toggleVoice() async {
+    // 語音收音前停止 TTS，避免回音
+    await ref.read(assistantTtsProvider.notifier).stop();
     final voice = ref.read(assistantVoiceProvider.notifier);
     final ended = await voice.toggleListening();
     if (ended != null && ended.isNotEmpty && mounted) {
@@ -133,9 +137,19 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
     ref.listen(assistantChatProvider, (prev, next) {
       if ((prev?.messages.length ?? 0) != next.messages.length) {
         _scrollToBottom();
+        // 新回覆到達時，若 TTS 啟用則自動播報最後一條 bot 訊息
+        if (!next.loading && next.messages.isNotEmpty) {
+          final last = next.messages.last;
+          if (!last.isUser) {
+            // 只播報第一行（避免播報過長）
+            final firstLine = last.text.split('\n').first.trim();
+            ref.read(assistantTtsProvider.notifier).speak(firstLine);
+          }
+        }
       }
     });
 
+    final tts = ref.watch(assistantTtsProvider);
     final wide = MediaQuery.sizeOf(context).width >= _sidebarBreakpoint;
     final showHelp = chat.isFreshWelcome && !chat.viewingHistory;
     final inputEnabled =
@@ -181,6 +195,17 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                 icon: const Icon(Icons.history, size: 30),
                 onPressed: () => _drawerKey.currentState?.openDrawer(),
               ),
+            IconButton(
+              tooltip: tts.enabled ? '關閉播報' : '開啟播報',
+              icon: Icon(
+                tts.speaking
+                    ? Icons.volume_up
+                    : (tts.enabled ? Icons.volume_up_outlined : Icons.volume_off),
+                size: 28,
+                color: tts.enabled ? Colors.white : Colors.white54,
+              ),
+              onPressed: () => ref.read(assistantTtsProvider.notifier).toggleEnabled(),
+            ),
             IconButton(
               tooltip: '新對話',
               icon: const Icon(Icons.add_comment_outlined, size: 28),
@@ -559,6 +584,7 @@ class _MessageBubble extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final tts = ref.watch(assistantTtsProvider);
     final isUser = message.isUser;
     final align = isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start;
     final bg = isUser ? const Color(0xFF2E7D32) : Colors.white;
@@ -630,6 +656,33 @@ class _MessageBubble extends ConsumerWidget {
                       fontSize: 14,
                       color: fg.withValues(alpha: 0.85),
                       fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+                if (!isUser && actionsEnabled) ...[
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: () => ref.read(assistantTtsProvider.notifier).speak(
+                          message.text,
+                          forceSpeak: true,
+                        ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          tts.speaking ? Icons.volume_up : Icons.volume_up_outlined,
+                          size: 22,
+                          color: const Color(0xFF5D4037),
+                        ),
+                        const SizedBox(width: 4),
+                        const Text(
+                          '重播',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Color(0xFF5D4037),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],

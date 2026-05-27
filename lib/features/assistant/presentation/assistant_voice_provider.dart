@@ -111,6 +111,9 @@ class AssistantVoiceInput extends Notifier<AssistantVoiceState> {
         );
       },
       localeId: locale,
+      // 高齡使用者停頓較長：延長靜音判定，降低句中截斷（報告 5.2.3）。
+      pauseFor: const Duration(milliseconds: 3500),
+      listenFor: const Duration(seconds: 60),
       listenOptions: SpeechListenOptions(
         partialResults: true,
         listenMode: ListenMode.dictation,

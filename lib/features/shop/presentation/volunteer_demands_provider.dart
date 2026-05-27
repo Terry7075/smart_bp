@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_bp/features/assistant/data/assistant_shop_action_service.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/shop/data/demand_records_repository.dart';
+import 'package:smart_bp/shared/debug/realtime_latency_tracker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// 志工端：需求草稿 Realtime（第五章 Realtime 同步）。
@@ -11,7 +12,12 @@ final volunteerDemandDraftsProvider =
   final repo = ref.watch(demandRecordsRepositoryProvider);
   final client = Supabase.instance.client;
 
-  Future<List<DemandRecord>> reload() => repo.listDraftsForVolunteer();
+  Future<List<DemandRecord>> reload() async {
+    final result = await repo.listDraftsForVolunteer();
+    // 記錄 Realtime 收到事件的時間戳（用於延遲量測）
+    ref.read(realtimeLatencyProvider.notifier).markReceived();
+    return result;
+  }
 
   return client
       .from('demand_records')

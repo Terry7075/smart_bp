@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +9,7 @@ import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_provider.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_realtime_provider.dart';
 import 'package:smart_bp/features/shop/presentation/volunteer_demands_provider.dart';
+import 'package:smart_bp/shared/debug/realtime_latency_banner.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -97,7 +99,9 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
             ),
           ],
         ),
-        body: SafeArea(
+        body: Stack(
+          children: [
+            SafeArea(
           child: async.when(
             loading: () => const Center(
               child: CircularProgressIndicator(color: VolunteerShopOrdersPage._volunteerBlue),
@@ -206,6 +210,10 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
               );
             },
           ),
+        ),
+            // Debug-only Realtime 延遲量測 banner
+            if (kDebugMode) const RealtimeLatencyBanner(),
+          ],
         ),
       ),
     );
