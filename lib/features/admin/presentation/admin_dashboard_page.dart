@@ -1,3 +1,4 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -27,6 +28,7 @@ class AdminDashboardPage extends ConsumerWidget {
     final stats = ref.watch(adminStatsProvider);
     final orders = ref.watch(adminOrdersProvider);
     final assetsAsync = ref.watch(_adminLocationAssetsProvider);
+    final chartAsync = ref.watch(adminChartDataProvider);
 
     return RoleGuard(
       requiredRole: RoleGuardTarget.admin,
@@ -56,14 +58,15 @@ class AdminDashboardPage extends ConsumerWidget {
           data: (s) {
             return RefreshIndicator(
               color: _adminTeal,
-              onRefresh: () async {
-                ref.invalidate(adminStatsProvider);
-                ref.invalidate(adminOrdersProvider);
-              },
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  Wrap(
+                    onRefresh: () async {
+                        ref.invalidate(adminStatsProvider);
+                        ref.invalidate(adminOrdersProvider);
+                        ref.invalidate(adminChartDataProvider);
+                      },
+                      child: ListView(
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          Wrap(
                     spacing: 12,
                     runSpacing: 12,
                     children: [
@@ -76,24 +79,33 @@ class AdminDashboardPage extends ConsumerWidget {
                     ],
                   ),
                   const SizedBox(height: 20),
-                  const Text('熱門品項 Top5', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Card(
-                    child: Column(
+                  // ── 圖表區塊 ──
+                  chartAsync.when(
+                    loading: () => const SizedBox(
+                      height: 200,
+                      child: Center(child: CircularProgressIndicator(color: _adminTeal)),
+                    ),
+                    error: (_, e) => const SizedBox.shrink(),
+                    data: (data) => Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (s.hotProducts.isEmpty)
-                          const ListTile(title: Text('尚無資料'))
+                        const Text(
+                          '近 7 天訂單趨勢',
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        _OrderLineChart(ordersByDay: data.ordersByDay),
+                        const SizedBox(height: 20),
+                        const Text(
+                          '熱門品項 Top5',
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        if (data.top5.isEmpty)
+                          const Card(child: ListTile(title: Text('尚無品項資料')))
                         else
-                          ...[
-                            for (final p in s.hotProducts)
-                              ListTile(
-                                title: Text(p.name, style: const TextStyle(fontSize: 18)),
-                                trailing: Text(
-                                  '× ${p.qty}',
-                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                          ],
+                          _Top5BarChart(top5: data.top5),
+                        const SizedBox(height: 16),
                       ],
                     ),
                   ),
@@ -184,6 +196,220 @@ class AdminDashboardPage extends ConsumerWidget {
     );
   }
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 近 7 天訂單折線圖
+// ────────────────────────────────────────────────────────────────────────────
+class _OrderLineChart extends StatelessWidget {
+  const _OrderLineChart({required this.ordersByDay});
+
+  final List<DayOrderCount> ordersByDay;
+
+  static const Color _lineColor = Color(0xFF00695C);
+
+  @override
+  Widget build(BuildContext context) {
+    final spots = <FlSpot>[];
+    for (var i = 0; i < ordersByDay.length; i++) {
+      spots.add(FlSpot(i.toDouble(), ordersByDay[i].count.toDouble()));
+    }
+    final maxY = ordersByDay.isEmpty
+        ? 5.0
+        : (ordersByDay.map((e) => e.count).reduce((a, b) => a > b ? a : b) + 2).toDouble();
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 20, 12),
+        child: SizedBox(
+          height: 180,
+          child: LineChart(
+            LineChartData(
+              minY: 0,
+              maxY: maxY,
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                horizontalInterval: 1,
+                getDrawingHorizontalLine: (v) => FlLine(
+                  color: Colors.grey.shade200,
+                  strokeWidth: 1,
+                ),
+              ),
+              borderData: FlBorderData(show: false),
+              titlesData: FlTitlesData(
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    interval: 1,
+                    reservedSize: 28,
+                    getTitlesWidget: (v, _) => Text(
+                      v.toInt().toString(),
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 28,
+                    getTitlesWidget: (v, _) {
+                      final idx = v.toInt();
+                      if (idx < 0 || idx >= ordersByDay.length) return const SizedBox.shrink();
+                      final d = ordersByDay[idx].date;
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          '${d.month}/${d.day}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              lineBarsData: [
+                LineChartBarData(
+                  spots: spots,
+                  isCurved: true,
+                  color: _lineColor,
+                  barWidth: 3,
+                  dotData: FlDotData(
+                    show: true,
+                    getDotPainter: (spot, pct, bar, idx) => FlDotCirclePainter(
+                      radius: 5,
+                      color: Colors.white,
+                      strokeWidth: 2.5,
+                      strokeColor: _lineColor,
+                    ),
+                  ),
+                  belowBarData: BarAreaData(
+                    show: true,
+                    color: _lineColor.withValues(alpha: 0.08),
+                  ),
+                ),
+              ],
+              lineTouchData: LineTouchData(
+                touchTooltipData: LineTouchTooltipData(
+                  getTooltipItems: (pts) => pts
+                      .map((p) => LineTooltipItem(
+                            '${p.y.toInt()} 筆',
+                            const TextStyle(color: Colors.white, fontSize: 14),
+                          ))
+                      .toList(),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Top5 品項橫條圖
+// ────────────────────────────────────────────────────────────────────────────
+class _Top5BarChart extends StatelessWidget {
+  const _Top5BarChart({required this.top5});
+
+  final List<({String name, int qty})> top5;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxQty = top5.isEmpty
+        ? 1.0
+        : top5.map((e) => e.qty).reduce((a, b) => a > b ? a : b).toDouble();
+    const barColor = Color(0xFF1565C0);
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 20, 16),
+        child: SizedBox(
+          height: top5.length * 52.0 + 16,
+          child: BarChart(
+            BarChartData(
+              alignment: BarChartAlignment.center,
+              maxY: maxQty + 2,
+              barTouchData: BarTouchData(
+                touchTooltipData: BarTouchTooltipData(
+                  getTooltipItem: (group, gIdx, rod, rIdx) => BarTooltipItem(
+                    '${rod.toY.toInt()} 件',
+                    const TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                ),
+              ),
+              titlesData: FlTitlesData(
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 90,
+                    getTitlesWidget: (v, _) {
+                      final idx = v.toInt();
+                      if (idx < 0 || idx >= top5.length) return const SizedBox.shrink();
+                      final name = top5[idx].name;
+                      return Text(
+                        name.length > 6 ? '${name.substring(0, 6)}…' : name,
+                        style: const TextStyle(fontSize: 13),
+                        textAlign: TextAlign.right,
+                      );
+                    },
+                  ),
+                ),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 28,
+                    interval: 1,
+                    getTitlesWidget: (v, _) => Text(
+                      v.toInt().toString(),
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ),
+              ),
+              gridData: FlGridData(
+                show: true,
+                drawHorizontalLine: false,
+                getDrawingVerticalLine: (v) => FlLine(
+                  color: Colors.grey.shade200,
+                  strokeWidth: 1,
+                ),
+              ),
+              borderData: FlBorderData(show: false),
+              barGroups: [
+                for (var i = 0; i < top5.length; i++)
+                  BarChartGroupData(
+                    x: i,
+                    barRods: [
+                      BarChartRodData(
+                        toY: top5[i].qty.toDouble(),
+                        color: barColor,
+                        width: 22,
+                        borderRadius: const BorderRadius.only(
+                          topRight: Radius.circular(6),
+                          bottomRight: Radius.circular(6),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 class _StatCard extends StatelessWidget {
   const _StatCard({required this.label, required this.value, required this.color});

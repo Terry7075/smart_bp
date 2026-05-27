@@ -59,53 +59,58 @@ class ShopPage extends ConsumerWidget {
           style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
         ),
         actions: [
+          // 最常用功能：語音需求（直接露出）
           TextButton.icon(
             style: TextButton.styleFrom(
               foregroundColor: colorScheme.onPrimary,
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             ),
-            icon: const Icon(Icons.edit_note, size: 24),
+            icon: const Icon(Icons.mic, size: 26),
             label: const Text(
               '語音需求',
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
             ),
             onPressed: () => context.push('/shop/demand-input'),
           ),
-          TextButton.icon(
-            style: TextButton.styleFrom(
-              foregroundColor: colorScheme.onPrimary,
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            ),
-            icon: const Icon(Icons.price_check, size: 24),
-            label: const Text(
-              '價格參考',
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-            ),
-            onPressed: () => context.push('/shop/prices'),
-          ),
-          TextButton.icon(
-            style: TextButton.styleFrom(
-              foregroundColor: colorScheme.onPrimary,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            ),
-            icon: const Icon(Icons.receipt_long, size: 24),
-            label: const Text(
-              '我的需求',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            onPressed: () => context.push('/shop/orders'),
-          ),
-          TextButton.icon(
-            style: TextButton.styleFrom(
-              foregroundColor: colorScheme.onPrimary,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            ),
-            icon: const Icon(Icons.store_mall_directory_outlined, size: 26),
-            label: const Text(
-              '全聯首頁',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            onPressed: () => _openPxMartBoxHome(context),
+          // 其餘功能收納進 PopupMenuButton，解決 iPhone SE 溢出問題
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert, color: colorScheme.onPrimary, size: 28),
+            onSelected: (value) {
+              switch (value) {
+                case 'orders':
+                  context.push('/shop/orders');
+                case 'prices':
+                  context.push('/shop/prices');
+                case 'pxmart':
+                  _openPxMartBoxHome(context);
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'orders',
+                child: ListTile(
+                  leading: Icon(Icons.receipt_long),
+                  title: Text('我的需求單', style: TextStyle(fontSize: 17)),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'prices',
+                child: ListTile(
+                  leading: Icon(Icons.price_check),
+                  title: Text('價格參考', style: TextStyle(fontSize: 17)),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'pxmart',
+                child: ListTile(
+                  leading: Icon(Icons.store_mall_directory_outlined),
+                  title: Text('全聯首頁', style: TextStyle(fontSize: 17)),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
           ),
         ],
       ),

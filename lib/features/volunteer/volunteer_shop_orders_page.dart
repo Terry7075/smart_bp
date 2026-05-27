@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_bp/features/assistant/data/assistant_shop_action_service.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/shop/data/demand_records_repository.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
@@ -12,6 +13,7 @@ import 'package:smart_bp/features/shop/presentation/volunteer_demands_provider.d
 import 'package:smart_bp/shared/debug/realtime_latency_banner.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 
 /// 志工端：全聯／柑仔店參考需求單列表（Supabase）。
 class VolunteerShopOrdersPage extends ConsumerStatefulWidget {
@@ -44,9 +46,55 @@ enum _OrderViewFilter { active, history, all }
 
 class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPage> {
   _OrderViewFilter _filter = _OrderViewFilter.active;
+  final _loadingDraftIds = <String>{};
 
   static bool _isActive(ShopOrderListRow o) => o.status == 'pending' || o.status == 'processing';
   static bool _isHistory(ShopOrderListRow o) => o.status == 'completed' || o.status == 'cancelled';
+
+  /// 志工接受草稿 → 轉為正式訂單 → 刷新兩端 Realtime。
+  Future<void> _acceptDraft(DemandRecord draft) async {
+    if (draft.activeItems.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('此草稿沒有有效品項，無法轉為訂單')),
+      );
+      return;
+    }
+    setState(() => _loadingDraftIds.add(draft.id));
+    try {
+      await ref.read(demandRecordsRepositoryProvider).submitDraftToOrders(
+            userId: draft.userId,
+            ordersRepo: ref.read(shopOrdersRepositoryProvider),
+          );
+      ref.invalidate(volunteerDemandDraftsProvider);
+      ref.invalidate(shopVolunteerOrdersProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF2E7D32),
+          content: Text(
+            '已將「${draft.activeItems.map((i) => i.productName).join("、")}」轉為正式訂單',
+            style: const TextStyle(fontSize: 17),
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFFC62828),
+          content: Text(
+            '接單失敗：$e\n請確認志工帳號有寫入 demand_records 的權限（RLS policy）',
+            style: const TextStyle(fontSize: 16),
+          ),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _loadingDraftIds.remove(draft.id));
+    }
+  }
 
   List<ShopOrderListRow> _applyFilter(List<ShopOrderListRow> orders) {
     return switch (_filter) {
@@ -165,17 +213,10 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
                                 ),
                                 children: [
                                   for (final d in e.value)
-                                    ListTile(
-                                      title: Text(
-                                        d.activeItems
-                                            .map((i) =>
-                                                '${i.productName}×${i.quantity}')
-                                            .join('、'),
-                                        style: const TextStyle(fontSize: 16),
-                                      ),
-                                      subtitle: Text(
-                                        '草稿 · ${VolunteerShopOrdersPage._formatTime(d.updatedAt)}',
-                                      ),
+                                    _DraftCard(
+                                      draft: d,
+                                      isLoading: _loadingDraftIds.contains(d.id),
+                                      onAccept: () => _acceptDraft(d),
                                     ),
                                 ],
                               ),
@@ -183,7 +224,7 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
                         );
                       },
                       loading: () => const SizedBox.shrink(),
-                      error: (_, __) => const SizedBox.shrink(),
+                      error: (_, e) => const SizedBox.shrink(),
                     ),
                     const SizedBox(height: 12),
                     const Text(
@@ -708,6 +749,74 @@ class _ErrorBody extends StatelessWidget {
           label: const Text('重試'),
         ),
       ],
+    );
+  }
+}
+
+/// 草稿需求卡片：顯示品項清單 + 「接受需求並轉為正式訂單」按鈕。
+class _DraftCard extends StatelessWidget {
+  const _DraftCard({
+    required this.draft,
+    required this.isLoading,
+    required this.onAccept,
+  });
+
+  final DemandRecord draft;
+  final bool isLoading;
+  final VoidCallback onAccept;
+
+  @override
+  Widget build(BuildContext context) {
+    final itemsSummary = draft.activeItems
+        .map((i) => '${i.productName} ×${i.quantity}')
+        .join('、');
+
+    return Card(
+      margin: const EdgeInsets.fromLTRB(0, 0, 0, 8),
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              itemsSummary.isNotEmpty ? itemsSummary : '（無品項）',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '草稿 · ${VolunteerShopOrdersPage._formatTime(draft.updatedAt)}',
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: isLoading || draft.activeItems.isEmpty ? null : onAccept,
+                icon: isLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.check_circle_outline, size: 22),
+                label: Text(
+                  isLoading ? '轉單中...' : '接受需求並轉為正式訂單',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1565C0),
+                  minimumSize: const Size(0, 48),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
