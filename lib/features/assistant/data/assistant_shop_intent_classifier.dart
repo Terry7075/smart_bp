@@ -81,6 +81,12 @@ abstract final class AssistantShopIntentClassifier {
         ShopIntentSlots(singleProduct: _extractProductForPrice(raw)),
       );
     }
+    if (_has(n, [
+      '到哪了', '到了嗎', '送到了嗎', '接單了嗎', '接了嗎', '接了沒',
+      '訂單狀態', '查訂單', '處理了嗎', '處理了沒', '送來了嗎',
+    ])) {
+      return (AssistantShopIntent.queryOrderStatus, null);
+    }
     if (_has(n, ['買了什麼', '記錄什麼', '說要買什麼', '剛剛買', '我的需求', '記了什麼'])) {
       return (AssistantShopIntent.viewRecorded, null);
     }
@@ -139,6 +145,14 @@ abstract final class AssistantShopIntentClassifier {
       return (AssistantShopIntent.viewRecorded, null);
     }
 
+    final orderStatusQ = RegExp(
+      r'(我的)?(東西|物資|訂單|需求)(送到哪|到哪了|到了嗎|怎麼了|狀態|進度)',
+    );
+    final volunteerQ = RegExp(r'志工.*(接|處理|來了|到了)');
+    if (orderStatusQ.hasMatch(n) || volunteerQ.hasMatch(n)) {
+      return (AssistantShopIntent.queryOrderStatus, null);
+    }
+
     return null;
   }
 
@@ -174,6 +188,10 @@ abstract final class AssistantShopIntentClassifier {
     }
     if (_has(n, viewSyn)) {
       return (AssistantShopIntent.viewRecorded, null);
+    }
+    const orderStatusSyn = ['訂單', '配送', '進度'];
+    if (_has(n, orderStatusSyn) && !_has(n, ['買', '購買', '添購'])) {
+      return (AssistantShopIntent.queryOrderStatus, null);
     }
     return null;
   }

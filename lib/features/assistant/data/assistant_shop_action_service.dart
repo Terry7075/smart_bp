@@ -46,6 +46,8 @@ class AssistantShopActionService {
         return _viewRecorded(userId, snapshot, layerNote);
       case AssistantShopIntent.cancelDemand:
         return _cancelDemand(userId, slots, layerNote);
+      case AssistantShopIntent.queryOrderStatus:
+        return _queryOrderStatus(snapshot, layerNote);
       case AssistantShopIntent.casual:
         return AssistantReply(
           text: '您好！想記需求可以說「我要買米和醬油」，查價說「雞蛋多少錢」。$layerNote',
@@ -204,6 +206,32 @@ class AssistantShopActionService {
         actions: const [_navShopOrders],
       );
     }
+  }
+
+  /// 查詢最近 1～3 筆訂單狀態，用長者聽得懂的語句回覆（搭配 TTS 播報）。
+  Future<AssistantReply> _queryOrderStatus(
+    AssistantSnapshot snapshot,
+    String layerNote,
+  ) async {
+    final orders = snapshot.recentOrders.take(3).toList();
+    if (orders.isEmpty) {
+      return AssistantReply(
+        text: '目前查不到您有送出的需求單。\n'
+            '若要下單可以說「我要買衛生紙」。$layerNote',
+        actions: const [_navShop],
+      );
+    }
+    final buf = StringBuffer('您最近的需求單：\n');
+    for (final o in orders) {
+      final label = ShopOrderStatus.orderStatusLabel(o.status);
+      final items = o.items.map((i) => i.productName).join('、');
+      buf.writeln('• $items — $label');
+    }
+    buf.write(layerNote);
+    return AssistantReply(
+      text: buf.toString(),
+      actions: const [_navShopOrders],
+    );
   }
 }
 

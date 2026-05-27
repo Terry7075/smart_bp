@@ -12,6 +12,9 @@ enum AssistantShopIntent {
   /// 取消需求（「那個牛奶不要了」）
   cancelDemand,
 
+  /// 查詢訂單狀態（「我的東西志工接了嗎」「訂單到哪了」）
+  queryOrderStatus,
+
   /// 一般對話
   casual,
 }
@@ -54,6 +57,7 @@ final class ShopIntentClassification {
         AssistantShopIntent.queryPrice => '查詢價格',
         AssistantShopIntent.viewRecorded => '查看已記錄',
         AssistantShopIntent.cancelDemand => '取消需求',
+        AssistantShopIntent.queryOrderStatus => '查詢訂單狀態',
         AssistantShopIntent.casual => '一般對話',
       };
 }
