@@ -119,6 +119,35 @@ class _OrderDetailBody extends StatelessWidget {
               ),
             ),
           ),
+          // 緊急提示 banner
+          if (order.isUrgent) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3E0),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE65100), width: 2),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.emergency, color: Color(0xFFE65100), size: 24),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '您已標記此單為緊急需求，志工端將優先處理。',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFBF360C),
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           const Text('配送進度', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
@@ -136,11 +165,18 @@ class _OrderDetailBody extends StatelessWidget {
               children: [
                 for (final it in order.items)
                   ListTile(
-                    title: Text(it.productName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                    title: Text(it.productName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
                     subtitle: Text(
-                      '× ${it.quantity}'
-                      '${it.unitPrice != null ? ' · ${it.unitPrice!.toStringAsFixed(0)} 元' : ''}',
-                      style: const TextStyle(fontSize: 16),
+                      () {
+                        final unitPart = it.unitLabel != null && it.unitLabel!.isNotEmpty
+                            ? ' ${it.unitLabel}'
+                            : '';
+                        final pricePart = it.unitPrice != null
+                            ? '・${it.unitPrice!.toStringAsFixed(0)} 元'
+                            : '';
+                        return '× ${it.quantity}$unitPart$pricePart';
+                      }(),
+                      style: const TextStyle(fontSize: 17),
                     ),
                   ),
               ],

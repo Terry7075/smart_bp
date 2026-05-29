@@ -12,6 +12,7 @@ import 'package:smart_bp/features/shop/presentation/shop_orders_realtime_provide
 import 'package:smart_bp/features/shop/presentation/volunteer_demands_provider.dart';
 import 'package:smart_bp/shared/debug/realtime_latency_banner.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:smart_bp/features/shop/data/px_mart_links.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 
@@ -97,11 +98,17 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
   }
 
   List<ShopOrderListRow> _applyFilter(List<ShopOrderListRow> orders) {
-    return switch (_filter) {
+    final filtered = switch (_filter) {
       _OrderViewFilter.active => orders.where(_isActive).toList(),
       _OrderViewFilter.history => orders.where(_isHistory).toList(),
-      _OrderViewFilter.all => orders,
+      _OrderViewFilter.all => orders.toList(),
     };
+    // 緊急優先；同緊急程度再按建立時間新→舊
+    filtered.sort((a, b) {
+      if (a.isUrgent != b.isUrgent) return a.isUrgent ? -1 : 1;
+      return b.createdAt.compareTo(a.createdAt);
+    });
+    return filtered;
   }
 
   static Map<String, List<ShopOrderListRow>> _groupByLocation(
@@ -114,7 +121,14 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
           : o.locationPointName!.trim();
       map.putIfAbsent(key, () => []).add(o);
     }
-    final keys = map.keys.toList()..sort();
+    // 有緊急訂單的據點排最前面
+    final keys = map.keys.toList()
+      ..sort((a, b) {
+        final aUrgent = map[a]!.any((o) => o.isUrgent) ? 0 : 1;
+        final bUrgent = map[b]!.any((o) => o.isUrgent) ? 0 : 1;
+        if (aUrgent != bUrgent) return aUrgent.compareTo(bUrgent);
+        return a.compareTo(b);
+      });
     return {for (final k in keys) k: map[k]!};
   }
 
@@ -450,19 +464,56 @@ class _OrderCard extends ConsumerWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: order.isUrgent
+            ? const BorderSide(color: Color(0xFFE65100), width: 2)
+            : BorderSide.none,
+      ),
+      color: order.isUrgent ? const Color(0xFFFFF8F5) : null,
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           childrenPadding:
               const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-          title: Text(
-            title,
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
+          title: Row(
+            children: [
+              if (order.isUrgent) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE65100),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.emergency, size: 14, color: Colors.white),
+                      SizedBox(width: 3),
+                      Text(
+                        '緊急',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ),
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 4),
@@ -644,23 +695,7 @@ class _OrderCard extends ConsumerWidget {
                 ),
               ),
             for (final it in order.items)
-              ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  it.productName,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                subtitle: Text(
-                  it.unitPrice != null
-                      ? '× ${it.quantity}（參考單價 ${it.unitPrice!.toStringAsFixed(0)} 元）'
-                      : '× ${it.quantity}',
-                  style: TextStyle(fontSize: 16, color: Colors.grey.shade800),
-                ),
-              ),
+              _OrderItemTile(item: it),
             const SizedBox(height: 4),
             SelectableText(
               '訂單編號：${order.id}',
@@ -674,6 +709,75 @@ class _OrderCard extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 志工端：單一品項列（顯示名稱/數量/單位/分類 + 前往全聯搜尋按鈕）。
+class _OrderItemTile extends StatelessWidget {
+  const _OrderItemTile({required this.item});
+
+  final ShopOrderItemRow item;
+
+  Future<void> _openPxSearch(BuildContext context) async {
+    final uri = buildPxMartUriFromName(item.productName);
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('無法開啟全聯電商，請稍後再試')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final unitPart = item.unitLabel != null && item.unitLabel!.isNotEmpty
+        ? ' ${item.unitLabel}'
+        : '';
+    final qtyText = '× ${item.quantity}$unitPart';
+    final categoryText = item.category != null && item.category!.isNotEmpty
+        ? '  ·  ${item.category}'
+        : '';
+    final priceText = item.unitPrice != null
+        ? '  ·  參考單價 ${item.unitPrice!.toStringAsFixed(0)} 元'
+        : '';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.productName,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '$qtyText$categoryText$priceText',
+                  style: TextStyle(fontSize: 15, color: Colors.grey.shade700),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton.icon(
+            onPressed: () => _openPxSearch(context),
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: const Text('全聯搜尋', style: TextStyle(fontSize: 14)),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              foregroundColor: const Color(0xFF1565C0),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -5,7 +5,9 @@ import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/family/data/family_links_repository.dart';
 import 'package:smart_bp/features/family/presentation/family_providers.dart';
+import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
+import 'package:smart_bp/features/shop/presentation/widgets/order_delivery_timeline.dart';
 
 /// 家屬關懷首頁：綁定長輩、查看代購進度。
 class FamilyHomePage extends ConsumerStatefulWidget {
@@ -149,55 +151,283 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// 家屬長輩綁定卡片：訂單清單 + inline compact 時間軸
+// ─────────────────────────────────────────────────────────────
+
 class _ElderLinkCard extends ConsumerWidget {
   const _ElderLinkCard({required this.link});
 
   final FamilyElderLink link;
+
+  static const Color _purple = Color(0xFF6A1B9A);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final orders = ref.watch(familyElderOrdersProvider(link.elderUserId));
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              link.elderName ?? '長輩',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            // ── 長輩姓名與稱謂
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: _purple.withValues(alpha: 0.12),
+                  child: const Icon(Icons.elderly, color: _purple, size: 26),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        link.elderName ?? '長輩',
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                      Text('我的${link.relation}', style: TextStyle(fontSize: 15, color: Colors.grey.shade700)),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: '重新整理',
+                  icon: const Icon(Icons.refresh),
+                  onPressed: () => ref.invalidate(familyElderOrdersProvider(link.elderUserId)),
+                ),
+              ],
             ),
-            Text('關係：${link.relation}', style: const TextStyle(fontSize: 16)),
-            const SizedBox(height: 8),
+            const Divider(height: 20),
+            // ── 訂單清單
             orders.when(
-              loading: () => const Text('讀取訂單中…'),
-              error: (e, _) => Text('訂單：$e'),
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (e, _) => Text('訂單讀取失敗：$e', style: const TextStyle(fontSize: 16)),
               data: (list) {
                 if (list.isEmpty) {
-                  return const Text('尚無代購需求單', style: TextStyle(fontSize: 16));
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text('尚無代購需求單', style: TextStyle(fontSize: 17)),
+                  );
                 }
-                final latest = list.first;
+                // 最多顯示 5 筆
+                final recent = list.take(5).toList();
                 return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      '最近：${ShopOrderStatus.orderStatusLabel(latest.status)}',
-                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 8),
-                    FilledButton.icon(
-                      onPressed: () => context.push('/shop/orders/${latest.id}'),
-                      icon: const Icon(Icons.timeline),
-                      label: const Text('查看配送進度'),
-                    ),
+                    for (final order in recent) ...[
+                      _FamilyOrderCard(order: order),
+                      const SizedBox(height: 8),
+                    ],
+                    if (list.length > 5)
+                      Center(
+                        child: TextButton.icon(
+                          onPressed: () => context.push('/shop/orders'),
+                          icon: const Icon(Icons.list_alt),
+                          label: Text('查看全部 ${list.length} 筆'),
+                        ),
+                      ),
                   ],
                 );
               },
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 家屬訂單卡片：狀態 chip + 緊急徽章 + 品項摘要 + inline compact 時間軸
+// ─────────────────────────────────────────────────────────────
+
+class _FamilyOrderCard extends StatefulWidget {
+  const _FamilyOrderCard({required this.order});
+
+  final ShopOrderListRow order;
+
+  @override
+  State<_FamilyOrderCard> createState() => _FamilyOrderCardState();
+}
+
+class _FamilyOrderCardState extends State<_FamilyOrderCard> {
+  bool _showTimeline = false;
+
+  static String _formatDate(DateTime t) {
+    final l = t.toLocal();
+    String p2(int n) => n.toString().padLeft(2, '0');
+    return '${l.month}/${p2(l.day)} ${p2(l.hour)}:${p2(l.minute)}';
+  }
+
+  Color _statusColor(String status) {
+    return switch (status) {
+      'pending' => const Color(0xFF1565C0),
+      'processing' => const Color(0xFFE65100),
+      'completed' => const Color(0xFF2E7D32),
+      'cancelled' => Colors.grey,
+      _ => Colors.grey,
+    };
+  }
+
+  IconData _statusIcon(String status) {
+    return switch (status) {
+      'pending' => Icons.hourglass_top_outlined,
+      'processing' => Icons.local_shipping_outlined,
+      'completed' => Icons.check_circle_outline,
+      'cancelled' => Icons.cancel_outlined,
+      _ => Icons.circle_outlined,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final order = widget.order;
+    final color = _statusColor(order.status);
+    final itemSummary = order.items.isEmpty
+        ? '（無品項）'
+        : order.items.take(3).map((it) {
+            final unit = it.unitLabel != null && it.unitLabel!.isNotEmpty
+                ? it.unitLabel!
+                : '件';
+            return '${it.productName} ×${it.quantity}$unit';
+          }).join('、') + (order.items.length > 3 ? '…' : '');
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: order.isUrgent ? const Color(0xFFE65100) : color.withValues(alpha: 0.3),
+          width: order.isUrgent ? 2 : 1,
+        ),
+        color: order.isUrgent ? const Color(0xFFFFF8F5) : Colors.white,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── 標頭列：狀態 chip + 緊急 badge + 日期
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+            child: Row(
+              children: [
+                // 狀態 chip
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(_statusIcon(order.status), size: 16, color: color),
+                      const SizedBox(width: 4),
+                      Text(
+                        ShopOrderStatus.orderStatusLabel(order.status),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: color,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // 緊急 badge
+                if (order.isUrgent) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE65100),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.emergency, size: 13, color: Colors.white),
+                        SizedBox(width: 3),
+                        Text(
+                          '緊急',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                Text(
+                  _formatDate(order.createdAt),
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+          // ── 品項摘要
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              itemSummary,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15, height: 1.35),
+            ),
+          ),
+          // ── 按鈕列
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+            child: Row(
+              children: [
+                // 展開時間軸
+                TextButton.icon(
+                  onPressed: () => setState(() => _showTimeline = !_showTimeline),
+                  icon: Icon(
+                    _showTimeline ? Icons.expand_less : Icons.timeline,
+                    size: 18,
+                  ),
+                  label: Text(
+                    _showTimeline ? '收起進度' : '查看進度',
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF6A1B9A),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  ),
+                ),
+                // 前往完整詳情頁
+                TextButton.icon(
+                  onPressed: () => context.push('/shop/orders/${order.id}'),
+                  icon: const Icon(Icons.open_in_new, size: 16),
+                  label: const Text('完整詳情', style: TextStyle(fontSize: 14)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // ── inline compact 時間軸（展開時顯示）
+          if (_showTimeline)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Divider(height: 8),
+                  const SizedBox(height: 8),
+                  OrderDeliveryTimeline(order: order, compact: true),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

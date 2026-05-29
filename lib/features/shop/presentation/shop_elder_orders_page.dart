@@ -75,16 +75,16 @@ class ShopElderOrdersPage extends ConsumerWidget {
                     if (index == 0) {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: Card(
-                          color: Colors.green.shade50,
-                          child: const Padding(
-                            padding: EdgeInsets.all(14),
-                            child: Text(
-                              '這裡會顯示你送出的需求單狀態。\n若需要更改或取消，請先聯絡志工或里幹部協助。',
-                              style: TextStyle(fontSize: 16, height: 1.4),
-                            ),
-                          ),
-                        ),
+        child: Card(
+          color: Colors.green.shade50,
+          child: const Padding(
+            padding: EdgeInsets.all(14),
+            child: Text(
+              '這裡會顯示你送出的需求單狀態。\n若需要更改或取消，請先聯絡志工或里幹部協助。',
+              style: TextStyle(fontSize: 18, height: 1.5),
+            ),
+          ),
+        ),
                       );
                     }
                     final o = orders[index - 1];
@@ -109,39 +109,84 @@ class _OrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusLine = '${ShopElderOrdersPage._formatTime(order.createdAt)} · '
-        '${ShopElderOrdersPage._statusLabel(order.status)} · '
-        '共 ${order.totalQuantity} 件'
-        '${order.totalAmount != null ? ' · 參考總額 ${order.totalAmount} 元' : ''}';
+    final timeText = ShopElderOrdersPage._formatTime(order.createdAt);
+    final statusText = ShopElderOrdersPage._statusLabel(order.status);
+    final totalText = '共 ${order.totalQuantity} 件'
+        '${order.totalAmount != null ? '・參考 ${order.totalAmount} 元' : ''}';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: order.isUrgent
+            ? const BorderSide(color: Color(0xFFE65100), width: 2)
+            : BorderSide.none,
+      ),
+      color: order.isUrgent ? const Color(0xFFFFF8F5) : null,
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           childrenPadding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-          title: Text(
-            '需求單 $displayNo',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          title: Row(
+            children: [
+              if (order.isUrgent) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE65100),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.emergency, size: 14, color: Colors.white),
+                      SizedBox(width: 3),
+                      Text('緊急', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
+                    ],
+                  ),
+                ),
+              ],
+              Text('需求單 $displayNo', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            ],
           ),
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text(statusLine, style: TextStyle(fontSize: 16, color: Colors.grey.shade700)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(timeText, style: TextStyle(fontSize: 15, color: Colors.grey.shade600)),
+                const SizedBox(height: 2),
+                Text(
+                  '$statusText  $totalText',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+              ],
+            ),
           ),
           children: [
             for (final it in order.items)
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                title: Text(it.productName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                title: Text(it.productName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
                 subtitle: Text(
-                  it.unitPrice != null
-                      ? '× ${it.quantity}（參考單價 ${it.unitPrice!.toStringAsFixed(0)} 元）'
-                      : '× ${it.quantity}',
-                  style: TextStyle(fontSize: 16, color: Colors.grey.shade800),
+                  () {
+                    final unitPart = it.unitLabel != null && it.unitLabel!.isNotEmpty
+                        ? ' ${it.unitLabel}'
+                        : '';
+                    final pricePart = it.unitPrice != null
+                        ? '・參考單價 ${it.unitPrice!.toStringAsFixed(0)} 元'
+                        : '';
+                    return '× ${it.quantity}$unitPart$pricePart';
+                  }(),
+                  style: TextStyle(fontSize: 17, color: Colors.grey.shade800),
                 ),
               ),
             const SizedBox(height: 4),
@@ -149,14 +194,14 @@ class _OrderCard extends StatelessWidget {
               '系統編號（報給志工核對）：${order.id}',
               style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             FilledButton.icon(
               onPressed: () => context.push('/shop/orders/${order.id}'),
-              icon: const Icon(Icons.timeline),
-              label: const Text('查看配送進度', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+              icon: const Icon(Icons.timeline, size: 22),
+              label: const Text('查看配送進度', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               style: FilledButton.styleFrom(
                 backgroundColor: ShopElderOrdersPage._green,
-                minimumSize: const Size.fromHeight(48),
+                minimumSize: const Size.fromHeight(52),
               ),
             ),
           ],

@@ -44,6 +44,7 @@ final class ShopOrderListRow {
     this.deliveryEvents = const [],
     this.locationPointId,
     this.locationPointName,
+    this.isUrgent = false,
   });
 
   final String id;
@@ -56,6 +57,9 @@ final class ShopOrderListRow {
   final DateTime? deliveredAt;
   final String? deliveryIssue;
   final List<OrderDeliveryEvent> deliveryEvents;
+
+  /// 長輩標記為緊急需求，志工端優先排序並顯示紅色徽章。
+  final bool isUrgent;
 
   /// 若志工可讀 `profiles` 則為姓名，否則為 null（UI 改顯示編號）。
   final String? elderDisplayName;
@@ -92,12 +96,20 @@ final class ShopOrderItemRow {
     required this.productName,
     required this.quantity,
     this.unitPrice,
+    this.category,
+    this.unitLabel,
   });
 
   final String productId;
   final String productName;
   final int quantity;
   final double? unitPrice;
+
+  /// 下單當下分類快照（清潔用品/米糧…），來自 order_items.category。
+  final String? category;
+
+  /// 下單當下計價單位快照（包/瓶/罐…），來自 order_items.unit_label。
+  final String? unitLabel;
 }
 
 /// 長輩歷史訂單加總後的常購提示（非 ML 推薦）。

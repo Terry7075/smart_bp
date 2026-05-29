@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/shop/data/image_proxy.dart';
 import 'package:smart_bp/features/shop/data/px_search_thumb_client.dart';
+import 'package:smart_bp/features/shop/data/shop_category_images.dart';
 import 'package:smart_bp/features/shop/domain/shop_product.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_provider.dart';
 import 'package:smart_bp/features/shop/presentation/shop_products_provider.dart';
@@ -157,6 +158,7 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
   int _pageIndex = 0;
   bool _showAll = false;
   bool _submitting = false;
+  bool _isUrgent = false;
 
   @override
   void initState() {
@@ -248,6 +250,7 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
         userId: user.id,
         products: _allProductsForOrder,
         quantitiesByProductId: _quantities,
+        isUrgent: _isUrgent,
       );
       if (!mounted) return;
       ref.invalidate(shopVolunteerOrdersProvider);
@@ -273,6 +276,7 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
           }
         }
         _manualProducts.clear();
+        _isUrgent = false;
       });
     } on PostgrestException catch (e) {
       if (!mounted) return;
@@ -625,13 +629,97 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
           SafeArea(
             top: false,
             child: Container(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              decoration: BoxDecoration(
+                color: _isUrgent
+                    ? const Color(0xFFFFF3E0)
+                    : Theme.of(context).colorScheme.surface,
+                border: Border(
+                  top: BorderSide(
+                    color: _isUrgent
+                        ? const Color(0xFFE65100)
+                        : Theme.of(context).colorScheme.outlineVariant,
+                    width: _isUrgent ? 2 : 1,
+                  ),
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(child: Text('$_totalCount 項\nNT\$${_totalAmount.toStringAsFixed(0)}')),
-                  FilledButton(
-                    onPressed: _submitting ? null : _submitOrder,
-                    child: const Text('送出需求'),
+                  // 緊急開關列
+                  InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => setState(() => _isUrgent = !_isUrgent),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _isUrgent ? Icons.emergency : Icons.emergency_outlined,
+                            color: _isUrgent ? const Color(0xFFE65100) : Colors.grey.shade600,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '緊急需求',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: _isUrgent ? const Color(0xFFE65100) : null,
+                                  ),
+                                ),
+                                Text(
+                                  _isUrgent ? '已標記為緊急，志工端將優先處理' : '如需緊急代購請開啟',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    color: _isUrgent
+                                        ? const Color(0xFFBF360C)
+                                        : Colors.grey.shade600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Switch(
+                            value: _isUrgent,
+                            onChanged: (v) => setState(() => _isUrgent = v),
+                            activeThumbColor: const Color(0xFFE65100),
+                            activeTrackColor: const Color(0xFFFFCCBC),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  // 總計 + 送出按鈕列
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '$_totalCount 項  NT\$${_totalAmount.toStringAsFixed(0)}',
+                          style: const TextStyle(fontSize: 15),
+                        ),
+                      ),
+                      FilledButton(
+                        onPressed: _submitting ? null : _submitOrder,
+                        style: _isUrgent
+                            ? FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFFE65100),
+                              )
+                            : null,
+                        child: _submitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : Text(_isUrgent ? '送出（緊急）' : '送出需求'),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1004,6 +1092,8 @@ class _ShopProductImageState extends State<_ShopProductImage> {
   int _pxRetryCount = 0;
   /// 未開「僅全聯」模式時，是否已因種子破圖而改打全聯。
   bool _pxFetchStarted = false;
+  /// 是否已嘗試過 category fallback 圖（避免重複觸發）。
+  bool _categoryFallbackUsed = false;
 
   void _schedulePxRetryIfNeeded() {
     if (!_preferPxThumb || !mounted) return;
@@ -1088,6 +1178,7 @@ class _ShopProductImageState extends State<_ShopProductImage> {
     _loadingPx = false;
     _pxRetryCount = 0;
     _pxFetchStarted = false;
+    _categoryFallbackUsed = false;
     if (_preferPxThumb) {
       _pxFetchStarted = true;
       _loadPxThumbFirst();
@@ -1104,6 +1195,17 @@ class _ShopProductImageState extends State<_ShopProductImage> {
         _schedulePxRetryIfNeeded();
         return;
       }
+      // 種子圖失敗：先試 category fallback（穩定 CDN），再試 PX Thumb API。
+      // localhost thumb 情況下跳過 PX Thumb，直接 category fallback → placeholder。
+      if (!_categoryFallbackUsed) {
+        final catUrl = ShopCategoryImages.urlForCategory(widget.product.category);
+        if (catUrl != null && catUrl.isNotEmpty) {
+          _categoryFallbackUsed = true;
+          setState(() => _url = catUrl);
+          return;
+        }
+      }
+      // category fallback 也失敗（或無對應分類）→ 嘗試 PX Thumb（非 localhost 時）
       _loadPxThumbAfterSeedFailed();
     });
   }

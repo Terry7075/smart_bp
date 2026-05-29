@@ -14,10 +14,10 @@ final class ShopOrdersRepository {
   );
 
   static const _orderSelect = '''
-id, user_id, status, created_at, total_amount,
+id, user_id, status, created_at, total_amount, is_urgent,
 assigned_volunteer_id, delivered_at, delivery_issue, location_point_id,
 location_points(name),
-order_items(product_id, product_name, quantity, unit_price, price_at_time),
+order_items(product_id, product_name, quantity, unit_price, price_at_time, category, unit_label),
 order_delivery_events(id, order_id, event_type, note, created_at)
 ''';
 
@@ -88,6 +88,7 @@ order_delivery_events(id, order_id, event_type, note, created_at)
     required String userId,
     required List<ShopProduct> products,
     required Map<String, int> quantitiesByProductId,
+    bool isUrgent = false,
   }) async {
     final items = <Map<String, dynamic>>[];
     var totalAmount = 0.0;
@@ -100,6 +101,8 @@ order_delivery_events(id, order_id, event_type, note, created_at)
         'product_name': p.name,
         'quantity': qty,
         'price_at_time': (p.unitPrice ?? 0).round(),
+        'category': p.category,
+        if (p.unitLabel != null && p.unitLabel!.isNotEmpty) 'unit_label': p.unitLabel,
       };
       if (p.unitPrice != null) row['unit_price'] = p.unitPrice;
       items.add(row);
@@ -115,6 +118,7 @@ order_delivery_events(id, order_id, event_type, note, created_at)
           'user_id': userId,
           'status': initialOrderStatus,
           'total_amount': totalAmount.round(),
+          'is_urgent': isUrgent,
         })
         .select('id')
         .single();
@@ -132,7 +136,7 @@ order_delivery_events(id, order_id, event_type, note, created_at)
     await _insertDeliveryEvent(
       orderId: orderId,
       eventType: ShopOrderStatus.created,
-      note: '長輩已送出物資需求單',
+      note: isUrgent ? '長輩標記為【緊急需求】已送出物資需求單' : '長輩已送出物資需求單',
     );
 
     return orderId;
@@ -384,6 +388,7 @@ order_delivery_events(id, order_id, event_type, note, created_at)
       deliveryEvents: _parseDeliveryEvents(row['order_delivery_events']),
       locationPointId: row['location_point_id']?.toString(),
       locationPointName: locName,
+      isUrgent: row['is_urgent'] == true,
     );
   }
 
@@ -415,6 +420,8 @@ order_delivery_events(id, order_id, event_type, note, created_at)
           productName: name.isEmpty ? '（未命名）' : name,
           quantity: qty,
           unitPrice: unit ?? priceAtTime,
+          category: row['category']?.toString(),
+          unitLabel: row['unit_label']?.toString(),
         ),
       );
     }
