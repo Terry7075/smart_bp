@@ -182,6 +182,40 @@ class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // ── 離線暫存 pending badge ─────────────────────────
+        ValueListenableBuilder<int>(
+          valueListenable: OfflineQueue.instance.pendingNotifier,
+          builder: (context, count, _) {
+            if (count <= 0) return const SizedBox.shrink();
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3E0),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE65100), width: 1.5),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_off, color: Color(0xFFE65100), size: 24),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '有 $count 筆需求尚未送出\n網路恢復後會自動送給志工',
+                      style: const TextStyle(
+                        fontSize: 17,
+                        height: 1.4,
+                        color: Color(0xFFBF360C),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+
         Text(
           '跟志工說想買什麼就好，不用分品牌、價格。\n'
           '例如按住麥克風說：「全聯的鮮奶兩罐，衛生紙一包」',

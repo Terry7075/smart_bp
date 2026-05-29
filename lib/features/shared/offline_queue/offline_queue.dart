@@ -67,7 +67,7 @@ class OfflineDemandItem {
 /// Hive 離線佇列：
 /// - 網路或 Supabase 寫入失敗時 [enqueue]。
 /// - App 啟動或網路恢復時 [flush]。
-/// - 使用 `client_request_id` 保證冪等（DB 已有該欄位 unique 約束時）。
+/// - 使用 `client_request_id` 保證冪等（DB unique index 存在時）。
 class OfflineQueue {
   static const _boxName = 'offline_demand_queue';
   static const _maxRetry = 5;
@@ -77,6 +77,9 @@ class OfflineQueue {
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   bool _flushing = false;
 
+  /// 供 UI 監聽待送數量，ValueListenableBuilder 可直接使用。
+  final ValueNotifier<int> pendingNotifier = ValueNotifier(0);
+
   OfflineQueue._();
 
   static Future<OfflineQueue> init() async {
@@ -85,8 +88,11 @@ class OfflineQueue {
     final box = await Hive.openBox<String>(_boxName);
     final q = OfflineQueue._();
     q._box = box;
+    q.pendingNotifier.value = box.length; // 還原上次未送完的數量
     q._startConnectivityWatch();
     _instance = q;
+    // 啟動時主動 flush（延遲 1.5 秒等 Supabase session 就緒）
+    Future.delayed(const Duration(milliseconds: 1500), q.flush);
     return q;
   }
 
@@ -115,6 +121,7 @@ class OfflineQueue {
       createdAt: DateTime.now(),
     );
     await _box.put(item.clientRequestId, jsonEncode(item.toJson()));
+    pendingNotifier.value = _box.length;
     if (kDebugMode) debugPrint('[OfflineQueue] enqueued: ${item.productName}');
   }
 
@@ -147,6 +154,7 @@ class OfflineQueue {
             jsonEncode(item.copyWith(retryCount: item.retryCount + 1).toJson()));
       }
     }
+    pendingNotifier.value = _box.length;
     _flushing = false;
   }
 
