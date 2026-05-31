@@ -72,6 +72,8 @@ class VolunteerTaskSubmitter {
     String? elderPhone,
     String? imagePath,
     List<String> takeMedicineTimes = const [],
+    String? medicationName,
+    String? pillAppearance,
   }) async {
     if (rawOcrText.trim().isEmpty) {
       throw ArgumentError('沒有 OCR 文字內容，無法送出任務');
@@ -111,14 +113,28 @@ class VolunteerTaskSubmitter {
 
     await client.from('volunteer_tasks').insert(payload);
 
-    await _ref.read(prescriptionRepositoryProvider).insertPendingVerificationPrescription(
-          id: taskId,
-          userId: user.id,
-          hospitalName: hospitalName?.trim(),
-          pickupDate: DateTime.now(),
-          takeMedicineTimes: takeMedicineTimes,
-          rawNotes: preview,
-        );
+    try {
+      await _ref
+          .read(prescriptionRepositoryProvider)
+          .insertPendingVerificationPrescription(
+            id: taskId,
+            userId: user.id,
+            hospitalName: hospitalName?.trim(),
+            pickupDate: DateTime.now(),
+            takeMedicineTimes: takeMedicineTimes,
+            medicationName: medicationName?.trim(),
+            pillAppearance: pillAppearance?.trim(),
+            rawNotes: preview,
+          );
+    } catch (e) {
+      // 藥單寫入失敗 → 回滾剛 insert 的 task，避免志工看到任務、長輩卻沒藥單。
+      try {
+        await client.from('volunteer_tasks').delete().eq('id', taskId);
+      } catch (_) {
+        // best-effort rollback
+      }
+      rethrow;
+    }
   }
 
   /// 把長輩端的本機照片上傳到 Supabase Storage，回傳 object path。
@@ -328,10 +344,37 @@ class VolunteerTasksNotifier extends AsyncNotifier<List<VolunteerTask>> {
         })
         .eq('id', taskId)
         .eq('claimed_by', me.id)
+        .eq('status', VolunteerTaskStatus.inProgress.dbValue)
         .select();
 
     if (updated.isEmpty) {
       throw StateError('這件任務可能已被別人處理，請下拉重新整理。');
+    }
+
+    final row = Map<String, dynamic>.from(updated.first as Map);
+    final elderId = row['elder_id'] as String;
+
+    // 同步 prescriptions → active（長輩端 Realtime 才會更新健康頁／通知）。
+    // 失敗時把 task 退回 in_progress，避免「志工以為完成、長輩仍待審核」split-brain。
+    try {
+      await ref.read(prescriptionRepositoryProvider).activateFromVolunteerTask(
+            id: taskId,
+            userId: elderId,
+            hospitalName: hospitalName.trim(),
+            pickupDate: pickupDate,
+            takeMedicineTimes: takeMedicineTimes,
+          );
+    } catch (e) {
+      try {
+        await client
+            .from('volunteer_tasks')
+            .update({'status': VolunteerTaskStatus.inProgress.dbValue})
+            .eq('id', taskId)
+            .eq('claimed_by', me.id);
+      } catch (_) {
+        // best-effort revert
+      }
+      throw StateError('藥單同步失敗，請再試一次。（$e）');
     }
 
     await refresh();

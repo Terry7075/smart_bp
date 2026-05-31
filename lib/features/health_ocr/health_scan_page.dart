@@ -9,20 +9,25 @@ import 'package:uuid/uuid.dart';
 
 import '../../core/notification_service.dart';
 import '../../shared/widgets/mindu_loading_overlay.dart';
+import '../medication/drug_dictionary_service.dart';
+import '../medication/widgets/drug_image_section.dart';
+import '../medication/widgets/medication_identity_card.dart';
+import '../prescription/prescription_models.dart';
 import '../prescription/prescription_provider.dart';
 import '../profile/profile_provider.dart';
 import '../volunteer/volunteer_task_provider.dart';
 import 'ocr_service.dart';
+import 'prescription_vision_service.dart';
 
 /// 「藥單小幫手」掃描頁面（長輩友善大字體 UX）。
 ///
 /// 整個頁面是一個明確的狀態機：
 ///
 /// - [_ScanStatus.idle]    → 提供拍照 / 相簿兩個超大按鈕
-/// - [_ScanStatus.loading] → 正在 OCR 辨識中
+/// - [_ScanStatus.loading] → 正在 AI 看圖辨識中
 /// - [_ScanStatus.success] → 抓到民國日期：請使用者確認後設提醒
 /// - [_ScanStatus.noDate]  → 抓不到日期：可能是一般藥單或拍不清楚
-/// - [_ScanStatus.error]   → 辨識失敗（取消選圖、平台不支援、ML Kit 錯誤）
+/// - [_ScanStatus.error]   → 辨識失敗（取消選圖、平台不支援、雲端 Vision 錯誤）
 class HealthScanPage extends ConsumerStatefulWidget {
   const HealthScanPage({super.key});
 
@@ -39,7 +44,7 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
   static const Color _alertRed = Color(0xFFC62828);
   static const Color _backgroundCream = Color(0xFFFFF8E1);
 
-  final OcrService _ocrService = OcrService();
+  final PrescriptionVisionService _visionService = PrescriptionVisionService();
 
   _ScanStatus _status = _ScanStatus.idle;
   PrescriptionResult? _result;
@@ -47,6 +52,13 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
 
   /// 「傳給志工幫忙」進行中：顯示遮罩並擋住其他互動，避免重複送單。
   bool _isSubmittingToVolunteer = false;
+
+  /// OCR 確認頁要顯示的藥典圖片查詢 Future。
+  ///
+  /// 進入 success 狀態時，依 OCR 抓到的藥名 candidates 同步打藥典，
+  /// 讓長輩在確認服藥時段之前就看到「藥典裡這顆藥的真實照片」，提早發現
+  /// Vision 把藥名認錯（例如把 Acetaminophen 認成 Amlodipine）的情況。
+  Future<DrugImageLookup>? _ocrDrugImageFuture;
 
   Future<void> _handleScan(ImageSource source) async {
     if (_status == _ScanStatus.loading) return;
@@ -58,7 +70,7 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
     });
 
     try {
-      final result = await _ocrService.processImage(source);
+      final result = await _visionService.processImage(source);
       if (!mounted) return;
 
       if (result == null) {
@@ -78,17 +90,55 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
       setState(() {
         _result = result;
         _status = result.hasDate ? _ScanStatus.success : _ScanStatus.noDate;
+        _ocrDrugImageFuture = _buildDrugImageFutureForOcr(result);
       });
     } catch (e) {
-      print('[HealthScan] OCR error: $e');
+      print('[HealthScan] Vision error: $e');
       if (!mounted) return;
       setState(() {
         _status = _ScanStatus.error;
-        _errorMessage = e is UnsupportedError
-            ? (e.message?.toString() ?? '此裝置不支援 OCR 辨識。')
-            : '辨識的時候出了點小狀況：\n$e';
+        _errorMessage = _visionErrorMessage(e);
       });
     }
+  }
+
+  /// 把可能來自 OCR / Vision 流程的任意例外，轉成「長輩看得懂的一句話」。
+  ///
+  /// `PrescriptionVisionService._buildFriendlyError` 已經把絕大多數情況包成
+  /// `StateError` 帶友善訊息，這裡的 fallback 主要負責處理：
+  /// - `UnsupportedError`（裝置不支援、Web/Desktop）
+  /// - 沒走 service（例如測試呼叫）卻直接拋 `FunctionException`／純文字錯誤
+  ///   的情境，仍然要避免把「FunctionException(status: 500, details: ...)」
+  ///   這種技術字串直接秀給長輩。
+  String _visionErrorMessage(Object e) {
+    if (e is UnsupportedError) {
+      return e.message?.toString() ?? '此裝置不支援藥單看圖辨識。';
+    }
+    if (e is StateError) {
+      return e.message;
+    }
+    final s = e.toString();
+    final lower = s.toLowerCase();
+
+    if (s.contains('429') ||
+        lower.contains('rate_limit') ||
+        lower.contains('rate limit') ||
+        s.contains('太忙碌') ||
+        lower.contains('too many requests')) {
+      return '辨識的人太多啦，\n請等約 1 分鐘再按「再試一次」。';
+    }
+
+    if (s.contains('503') ||
+        lower.contains('overload') ||
+        lower.contains('gemini') ||
+        lower.contains('unavailable') ||
+        lower.contains('internal server error')) {
+      return 'AI 小幫手剛剛太忙，\n請休息 30 秒到 1 分鐘後再按「再試一次」。';
+    }
+
+    // 其他不明狀況：絕對不要把例外 toString 原樣 echo 出去（會看到
+    // `FunctionException(status: 500, ...)` 這類嚇人字串）。
+    return '看圖辨識的時候出了點小狀況，\n請稍候再按「再試一次」。';
   }
 
   void _resetToIdle() {
@@ -96,6 +146,33 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
       _status = _ScanStatus.idle;
       _result = null;
       _errorMessage = null;
+      _ocrDrugImageFuture = null;
+    });
+  }
+
+  /// 從 OCR 結果 build 藥典查詢 Future。
+  /// `combinedMedicationName` 以「、」串接多藥，`buildDrugLookupCandidates`
+  /// 再切回 candidates 餵給 service。
+  Future<DrugImageLookup> _buildDrugImageFutureForOcr(
+    PrescriptionResult result,
+  ) {
+    final candidates = buildDrugLookupCandidates(
+      medicationName: result.combinedMedicationName,
+    );
+    if (candidates.isEmpty) {
+      return Future<DrugImageLookup>.value(const DrugImageNotFound());
+    }
+    return ref
+        .read(drugDictionaryServiceProvider)
+        .fetchDrugImageForCandidates(candidates);
+  }
+
+  /// 「重新查詢藥典」按鈕：重新建一個 Future 觸發 [DrugImageSection] 重新 build。
+  void _retryOcrDrugImageLookup() {
+    final result = _result;
+    if (result == null) return;
+    setState(() {
+      _ocrDrugImageFuture = _buildDrugImageFutureForOcr(result);
     });
   }
 
@@ -107,13 +184,13 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
     }
   }
 
-  /// Success：寫入 `prescriptions` + 依藥單 UUID 排本機通知（與其他藥單並存）。
+  /// Success：寫入 `prescriptions` + 依藥單 UUID 排每日吃藥本機通知。
   ///
-  /// [pickupDate]：已含「基準日校準」後的領藥日；[baselineDate] 僅在推算情境有意義。
-  Future<void> _confirmAndScheduleReminders({
-    required DateTime pickupDate,
-    DateTime? baselineDate,
-  }) async {
+  /// [takeMedicineTimes] 由 [_SuccessView] 傳入「使用者在確認頁編輯過的版本」，
+  /// 而非 OCR 原始結果——這是 Vision 解析錯誤時最後的補救機會。
+  Future<void> _confirmAndScheduleReminders(
+    List<String> takeMedicineTimes,
+  ) async {
     final result = _result;
     if (result == null) {
       _backToHome();
@@ -136,45 +213,64 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
       return;
     }
 
-    final prescriptionId = const Uuid().v4();
-    final pickupDay =
-        DateTime(pickupDate.year, pickupDate.month, pickupDate.day);
-    final baselineDay = baselineDate != null
-        ? DateTime(baselineDate.year, baselineDate.month, baselineDate.day)
-        : null;
+    final prescriptionId = result.prescriptionId ?? const Uuid().v4();
 
-    try {
-      final preview = result.rawText.length > 800
-          ? '${result.rawText.substring(0, 800)}…'
-          : result.rawText;
-      await ref.read(prescriptionRepositoryProvider).insertOcrPrescription(
-            id: prescriptionId,
-            userId: uid,
-            hospitalName: result.hospitalName,
-            pickupDate: pickupDay,
-            takeMedicineTimes: result.takeMedicineTimes,
-            medicationDays: result.medicationDays,
-            baselineDate: baselineDay,
-            rawNotes: preview,
-          );
-    } catch (e) {
-      print('[HealthScan] insert prescription error: $e');
-      if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          backgroundColor: _alertRed,
-          duration: const Duration(seconds: 8),
-          content: Text(
-            '藥單紀錄寫入失敗（請確認 Supabase 已建立 prescriptions 表）：\n$e',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              height: 1.35,
+    if (result.prescriptionId == null) {
+      final pickupDay = _pickupDayForDb(result);
+      final baselineDay = result.isInferred && result.medicationDays != null
+          ? DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day)
+          : null;
+
+      try {
+        final preview = result.rawText.length > 800
+            ? '${result.rawText.substring(0, 800)}…'
+            : result.rawText;
+        await ref.read(prescriptionRepositoryProvider).insertOcrPrescription(
+              id: prescriptionId,
+              userId: uid,
+              hospitalName: result.hospitalName,
+              medicationName: result.combinedMedicationName,
+              pickupDate: pickupDay,
+              takeMedicineTimes: takeMedicineTimes,
+              medicationDays: result.medicationDays,
+              baselineDate: baselineDay,
+              pillAppearance: result.effectivePillAppearance.isNotEmpty
+                  ? result.effectivePillAppearance
+                  : result.pillAppearance,
+              rawNotes: preview,
+            );
+      } catch (e) {
+        print('[HealthScan] insert prescription error: $e');
+        if (!mounted) return;
+        messenger.showSnackBar(
+          SnackBar(
+            backgroundColor: _alertRed,
+            duration: const Duration(seconds: 8),
+            content: Text(
+              '藥單紀錄寫入失敗（請確認 Supabase 已建立 prescriptions 表）：\n$e',
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                height: 1.35,
+              ),
             ),
           ),
-        ),
-      );
-      return;
+        );
+        return;
+      }
+    } else {
+      // Vision 流程：占位列已由 Edge Function 寫入「AI 解析的時段」。
+      // 使用者若在確認頁改過時段，這裡必須回寫，否則本機通知會用編輯後的
+      // 時間、但健康卡 / 打卡頁仍顯示 AI 原本的時段，兩邊對不上。
+      try {
+        await ref.read(prescriptionRepositoryProvider).updateTakeMedicineTimes(
+              prescriptionId: prescriptionId,
+              takeMedicineTimes: takeMedicineTimes,
+            );
+      } catch (e) {
+        // 回寫失敗不阻斷後續排程；最壞情況只是顯示時段與通知時間有落差。
+        print('[HealthScan] update take_medicine_times error: $e');
+      }
     }
 
     NotificationScheduleResult scheduleResult;
@@ -182,9 +278,7 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
       scheduleResult =
           await NotificationService.instance.schedulePrescriptionReminders(
         prescriptionId: prescriptionId,
-        takeMedicineTimes: result.takeMedicineTimes,
-        pickupDate: pickupDay,
-        hospitalName: result.hospitalName,
+        takeMedicineTimes: takeMedicineTimes,
       );
     } catch (e) {
       print('[HealthScan] schedule reminder error: $e');
@@ -207,22 +301,16 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
     if (!mounted) return;
 
     if (!scheduleResult.granted) {
-      messenger.showSnackBar(
-        const SnackBar(
-          backgroundColor: _warningOrange,
-          duration: Duration(seconds: 6),
-          content: Text(
-            '⚠️ 還沒打開「通知」權限喔，\n請到手機設定 → 應用程式 → 明德 e 達人 → 通知，把它打開才會收到提醒。',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, height: 1.4),
-          ),
-        ),
-      );
+      await _showNotificationPermissionDialog();
+      if (!mounted) return;
       ref.invalidate(activePrescriptionsProvider);
       _backToHome();
       return;
     }
 
-    final feedback = _buildScheduleFeedback(scheduleResult);
+    final feedback = scheduleResult.hasAnyScheduled
+        ? '✅ 設定完成！系統會每天按時提醒您吃藥喔！'
+        : '已記下這張藥單，但這次沒有可以設定的吃藥提醒。';
     messenger.showSnackBar(
       SnackBar(
         backgroundColor: _primaryGreen,
@@ -237,19 +325,58 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
     _backToHome();
   }
 
-  /// 依排程結果組合一段對長輩友善的中文訊息。
-  String _buildScheduleFeedback(NotificationScheduleResult result) {
-    if (!result.hasAnyScheduled) {
-      return '已記下這張藥單，但這次沒有可以設定的提醒。';
+  /// 通知權限被拒：用對話框（不會自動消失）清楚引導長輩到設定打開。
+  Future<void> _showNotificationPermissionDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFFFFF8E1),
+        title: const Text(
+          '⚠️ 還沒打開「通知」權限',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          '藥單已經幫您記下來了，\n'
+          '但因為通知還沒打開，暫時不會叮咚提醒您吃藥。\n\n'
+          '請到手機的：\n'
+          '設定 → 應用程式 → 明德 e 達人 → 通知\n'
+          '把通知打開，就會準時提醒囉！',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, height: 1.5),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            height: 56,
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: _primaryGreen),
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text(
+                '我知道了',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 僅供雲端／志工端物流使用；長輩 UI 不再顯示領藥日。
+  DateTime _pickupDayForDb(PrescriptionResult result) {
+    final direct = result.pickupDateTime;
+    if (direct != null) {
+      return DateTime(direct.year, direct.month, direct.day);
     }
-    final parts = <String>[];
-    if (result.medicationCount > 0) {
-      parts.add('每天 ${result.medicationCount} 個吃藥時段');
+    if (result.isInferred && result.medicationDays != null) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      return today.add(Duration(days: result.medicationDays!));
     }
-    if (result.pickupScheduled) {
-      parts.add('下次回診領藥日');
-    }
-    return '🔔 已幫您設好提醒（${parts.join('、')}），到時間手機會叮咚通知您！';
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
   }
 
   /// NoDate 狀態的「這是慢箋（傳給志工幫忙）」按鈕：
@@ -323,6 +450,10 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
             // 把原始藥單照片一起送上 Storage，志工可在儀表板查看原圖。
             imagePath: result.imagePath,
             takeMedicineTimes: result.takeMedicineTimes,
+            pillAppearance: result.effectivePillAppearance.isNotEmpty
+                ? result.effectivePillAppearance
+                : result.pillAppearance,
+            medicationName: result.combinedMedicationName,
           );
 
       if (!mounted) return;
@@ -400,7 +531,11 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
       case _ScanStatus.success:
         return _SuccessView(
           result: _result!,
+          drugImageFuture: _ocrDrugImageFuture,
           onConfirm: _confirmAndScheduleReminders,
+          onRetake: _resetToIdle,
+          onSendToVolunteer: _sendToVolunteer,
+          onRetryDrugImage: _retryOcrDrugImageLookup,
         );
       case _ScanStatus.noDate:
         return _NoDateView(
@@ -493,7 +628,7 @@ class _LoadingView extends StatelessWidget {
           ),
           SizedBox(height: 32),
           Text(
-            '👀 小幫手正在努力\n看您的藥單，',
+            '👀 AI 小幫手正在努力\n看您的藥單，',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 28,
@@ -525,110 +660,121 @@ class _LoadingView extends StatelessWidget {
 class _SuccessView extends StatefulWidget {
   const _SuccessView({
     required this.result,
+    required this.drugImageFuture,
     required this.onConfirm,
+    required this.onRetake,
+    required this.onSendToVolunteer,
+    required this.onRetryDrugImage,
   });
 
   final PrescriptionResult result;
 
-  /// [pickupDate]：領藥日（已換算成 DateTime，時間視為當日 00:00 語意）。
-  /// [baselineDate]：開始吃藥／領藥基準日（推算模式下記錄用）。
-  final Future<void> Function({
-    required DateTime pickupDate,
-    DateTime? baselineDate,
-  }) onConfirm;
+  /// 由 parent 預先打好的藥典圖片查詢 Future。`null` 代表沒有要查
+  /// （目前不會發生，但保留 nullable 給未來「OCR 沒抓到任何藥名」的情境）。
+  final Future<DrugImageLookup>? drugImageFuture;
+
+  /// 確認按鈕的 callback，會帶回**使用者編輯後**的服藥時段。
+  /// OCR 解析時段錯誤時（最常見的錯誤類型），長輩可在這頁直接更正，
+  /// 不必整張藥單重拍或丟給志工。
+  final Future<void> Function(List<String> takeMedicineTimes) onConfirm;
+  final VoidCallback onRetake;
+  final Future<void> Function() onSendToVolunteer;
+
+  /// 「重新查詢藥典」按鈕的 callback，連到 parent 的 lookup 重打邏輯。
+  final VoidCallback onRetryDrugImage;
 
   @override
   State<_SuccessView> createState() => _SuccessViewState();
 }
 
 class _SuccessViewState extends State<_SuccessView> {
-  /// 「是否為今天剛拿到的藥」— `true` 時基準日鎖定為今日。
-  bool _todayMedicine = true;
-
-  /// 推算模式下：從哪一天開始算給藥天數（純日期）。
-  late DateTime _baselineStart;
-
   bool _confirmBusy = false;
+
+  /// 使用者編輯後的服藥時段（local copy）。
+  /// 進頁面時用 OCR 結果初始化，之後 [_editTime] / [_addTime] / [_removeTime]
+  /// 都只動這個列表，按下「資料都對」才送回 parent。
+  late List<String> _takeMedicineTimes;
 
   @override
   void initState() {
     super.initState();
-    _baselineStart = _startOfDay(DateTime.now());
+    _takeMedicineTimes = List<String>.from(widget.result.takeMedicineTimes);
   }
 
-  DateTime _startOfDay(DateTime d) => DateTime(d.year, d.month, d.day);
+  String _formatTime(TimeOfDay t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
-  /// 依「基準日 + 給藥天數」或 OCR 直接結果取得領藥日（全日語意）。
-  DateTime? get _effectivePickup {
-    final r = widget.result;
-    if (r.isInferred && r.medicationDays != null) {
-      final base = _startOfDay(_baselineStart);
-      return base.add(Duration(days: r.medicationDays!));
-    }
-    return r.pickupDateTime;
+  TimeOfDay _parseTime(String hhmm) {
+    final parts = hhmm.split(':');
+    final h = int.tryParse(parts.isNotEmpty ? parts[0] : '') ?? 8;
+    final m = int.tryParse(parts.length > 1 ? parts[1] : '') ?? 0;
+    return TimeOfDay(hour: h.clamp(0, 23), minute: m.clamp(0, 59));
   }
 
-  String _formatChineseDay(DateTime d) =>
-      '${d.year} 年 ${d.month} 月 ${d.day} 日';
-
-  String _formatInferredFromIso(String iso) {
-    try {
-      final parsed = DateTime.parse(iso);
-      return _formatChineseDay(parsed);
-    } catch (_) {
-      return iso;
-    }
-  }
-
-  Future<void> _pickOtherBaselineDay() async {
-    final initial = _baselineStart;
-    final picked = await showDatePicker(
+  Future<void> _editTime(int idx) async {
+    final picked = await showTimePicker(
       context: context,
-      initialDate: initial,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now(),
-      helpText: '您開始吃這包藥的日期',
+      initialTime: _parseTime(_takeMedicineTimes[idx]),
+      helpText: '修改服藥時間',
       cancelText: '取消',
       confirmText: '確定',
     );
-    if (picked != null && mounted) {
-      setState(() => _baselineStart = _startOfDay(picked));
+    if (picked == null) return;
+    setState(() {
+      _takeMedicineTimes[idx] = _formatTime(picked);
+      _takeMedicineTimes = _dedupAndSort(_takeMedicineTimes);
+    });
+  }
+
+  Future<void> _addTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 8, minute: 0),
+      helpText: '新增服藥時間',
+      cancelText: '取消',
+      confirmText: '確定',
+    );
+    if (picked == null) return;
+    setState(() {
+      _takeMedicineTimes = _dedupAndSort([
+        ..._takeMedicineTimes,
+        _formatTime(picked),
+      ]);
+    });
+  }
+
+  void _removeTime(int idx) {
+    setState(() => _takeMedicineTimes.removeAt(idx));
+  }
+
+  /// 去重 + 排序，避免使用者重複新增同一個時段（會讓 schedule 浪費通知槽位）。
+  static List<String> _dedupAndSort(List<String> raw) {
+    final set = <String>{};
+    for (final t in raw) {
+      final trimmed = t.trim();
+      if (trimmed.isNotEmpty) set.add(trimmed);
     }
-  }
-
-  void _setTodayMedicineYes() {
-    setState(() {
-      _todayMedicine = true;
-      _baselineStart = _startOfDay(DateTime.now());
-    });
-  }
-
-  void _setTodayMedicineNo() {
-    setState(() {
-      _todayMedicine = false;
-    });
-  }
-
-  void _nudgeBaselineByDays(int deltaDays) {
-    final today = _startOfDay(DateTime.now());
-    setState(() {
-      _baselineStart = _startOfDay(today.add(Duration(days: deltaDays)));
-    });
+    final list = set.toList()..sort();
+    return list;
   }
 
   Future<void> _onTapFinish() async {
-    final pickup = _effectivePickup;
-    if (pickup == null) return;
-
+    if (_takeMedicineTimes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: _HealthScanPageState._warningOrange,
+          duration: Duration(seconds: 4),
+          content: Text(
+            '至少要保留一個服藥時段，才能設定提醒喔。',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+        ),
+      );
+      return;
+    }
     setState(() => _confirmBusy = true);
     try {
-      await widget.onConfirm(
-        pickupDate: pickup,
-        baselineDate:
-            widget.result.isInferred && widget.result.medicationDays != null
-                ? _startOfDay(_baselineStart)
-                : null,
-      );
+      await widget.onConfirm(List<String>.unmodifiable(_takeMedicineTimes));
     } finally {
       if (mounted) setState(() => _confirmBusy = false);
     }
@@ -637,40 +783,44 @@ class _SuccessViewState extends State<_SuccessView> {
   @override
   Widget build(BuildContext context) {
     final r = widget.result;
-    final inferred = r.isInferred && r.medicationDays != null;
-    final dateLabel =
-        inferred ? '下次拿藥的時間（依基準日重新推算）' : '下次拿藥的時間';
-
-    final effective = _effectivePickup;
-    final dateText = effective != null
-        ? _formatChineseDay(effective)
-        : (inferred ? _formatInferredFromIso(r.pickupDate!) : '民國 ${r.pickupDate!}');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text(
-          '✅ 記下來了！\n太棒了！',
+          '👀 請確認以下資料是否正確',
           textAlign: TextAlign.center,
           style: TextStyle(
-            fontSize: 32,
+            fontSize: 30,
             fontWeight: FontWeight.bold,
             color: _HealthScanPageState._primaryGreen,
-            height: 1.3,
+            height: 1.35,
           ),
         ),
-        const SizedBox(height: 24),
-        Card(
-          color: Colors.white,
-          elevation: 3,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (r.hospitalName != null) ...[
+        const SizedBox(height: 10),
+        const Text(
+          '系統會依下列資料每天提醒您吃藥。\n服藥時段「輕觸」可以修改、按「－」刪除；\n如果整張藥單都不對，請按「重拍」或「請志工幫忙」。',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.w600,
+            color: Colors.black54,
+            height: 1.5,
+          ),
+        ),
+        if (r.hospitalName != null) ...[
+          const SizedBox(height: 24),
+          Card(
+            color: Colors.white,
+            elevation: 3,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   const _InfoLabel(icon: '🏥', label: '看診的醫院'),
                   const SizedBox(height: 8),
                   Text(
@@ -681,153 +831,47 @@ class _SuccessViewState extends State<_SuccessView> {
                       height: 1.4,
                     ),
                   ),
-                  const Divider(height: 32, thickness: 1),
                 ],
-                _InfoLabel(icon: '📅', label: dateLabel),
-                const SizedBox(height: 8),
-                Text(
-                  dateText,
-                  style: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: _HealthScanPageState._alertRed,
-                    height: 1.4,
-                  ),
-                ),
-                if (inferred && r.medicationDays != null) ...[
-                  const SizedBox(height: 16),
-                  _InferredHint(days: r.medicationDays!),
-                  const SizedBox(height: 24),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFF8E1),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: const Color(0xFFE65100).withValues(alpha: 0.45),
-                        width: 2,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text(
-                          '請問這是您今天剛拿到的藥嗎？',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            height: 1.35,
-                            color: Color(0xFFBF360C),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _HugeChoiceButton(
-                                label: '✅ 是',
-                                color: _HealthScanPageState._primaryGreen,
-                                selected: _todayMedicine,
-                                onTap: _setTodayMedicineYes,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _HugeChoiceButton(
-                                label: '否',
-                                color: _HealthScanPageState._accentBlue,
-                                selected: !_todayMedicine,
-                                onTap: _setTodayMedicineNo,
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (!_todayMedicine) ...[
-                          const SizedBox(height: 20),
-                          const Text(
-                            '請選開始吃藥的那一天（或小幫手才知道怎麼推算）：',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
-                              height: 1.35,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: [
-                              _QuickDayChip(
-                                label: '前天',
-                                onTap: () => _nudgeBaselineByDays(-2),
-                              ),
-                              _QuickDayChip(
-                                label: '昨天',
-                                onTap: () => _nudgeBaselineByDays(-1),
-                              ),
-                              _QuickDayChip(
-                                label: '今天',
-                                onTap: () => _nudgeBaselineByDays(0),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          SizedBox(
-                            height: 64,
-                            width: double.infinity,
-                            child: OutlinedButton(
-                              onPressed: _pickOtherBaselineDay,
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.black87,
-                                side: const BorderSide(
-                                  color: Colors.black38,
-                                  width: 2,
-                                ),
-                              ),
-                              child: const Text(
-                                '📆 選其他日期…',
-                                style: TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '目前基準日：${_formatChineseDay(_baselineStart)}',
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF1565C0),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ],
+              ),
             ),
           ),
-        ),
-        if (r.hasTakeMedicineTimes) ...[
+        ],
+        if (r.medicationNames.isNotEmpty ||
+            r.effectivePillAppearance.isNotEmpty) ...[
           const SizedBox(height: 20),
-          _TakeMedicineTimesCard(times: r.takeMedicineTimes),
+          MedicationIdentityCard(
+            record: PrescriptionRecord(
+              id: 'preview',
+              userId: '',
+              medicationName: r.combinedMedicationName,
+              pillAppearance: r.pillAppearance ?? r.effectivePillAppearance,
+              status: 'active',
+              source: 'ocr',
+              createdAt: DateTime.now(),
+            ),
+            compact: true,
+          ),
+        ],
+        if (widget.drugImageFuture != null) ...[
+          const SizedBox(height: 20),
+          DrugImageSection(
+            future: widget.drugImageFuture!,
+            onRetry: widget.onRetryDrugImage,
+            heroTag: 'ocr-drug-image-${r.combinedMedicationName ?? r.rawText.hashCode}',
+          ),
         ],
         const SizedBox(height: 20),
-        _TipCard(
-          icon: '🔔',
-          text: '時間快到時，手機會叮咚提醒您喔！',
-          backgroundColor: const Color(0xFFE8F5E9),
-          textColor: _HealthScanPageState._primaryGreen,
+        _EditableTimesCard(
+          times: _takeMedicineTimes,
+          onEdit: _editTime,
+          onAdd: _addTime,
+          onRemove: _removeTime,
         ),
         const SizedBox(height: 28),
         SizedBox(
           height: 96,
           child: ElevatedButton(
-            onPressed: (_confirmBusy || effective == null) ? null : _onTapFinish,
+            onPressed: _confirmBusy ? null : _onTapFinish,
             style: ElevatedButton.styleFrom(
               backgroundColor: _HealthScanPageState._primaryGreen,
               foregroundColor: Colors.white,
@@ -847,164 +891,100 @@ class _SuccessViewState extends State<_SuccessView> {
                     ),
                   )
                 : const Text(
-                    '完成，回首頁',
+                    '✅ 資料都對，幫我設定提醒',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 26,
+                      fontSize: 24,
                       fontWeight: FontWeight.bold,
                       height: 1.25,
                     ),
                   ),
           ),
         ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 72,
+                child: OutlinedButton.icon(
+                  onPressed: _confirmBusy ? null : widget.onRetake,
+                  icon: const Icon(Icons.refresh, size: 24),
+                  label: const Text(
+                    '🔄 重新拍',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _HealthScanPageState._primaryGreen,
+                    side: const BorderSide(
+                      color: _HealthScanPageState._primaryGreen,
+                      width: 2,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: SizedBox(
+                height: 72,
+                child: OutlinedButton.icon(
+                  onPressed: _confirmBusy
+                      ? null
+                      : () => widget.onSendToVolunteer(),
+                  icon: const Icon(Icons.support_agent, size: 24),
+                  label: const Text(
+                    '🙋 請志工幫忙',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _HealthScanPageState._accentBlue,
+                    side: const BorderSide(
+                      color: _HealthScanPageState._accentBlue,
+                      width: 2,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
 }
 
-class _HugeChoiceButton extends StatelessWidget {
-  const _HugeChoiceButton({
-    required this.label,
-    required this.color,
-    required this.selected,
-    required this.onTap,
+/// 可編輯版的「每日吃藥時間」卡片：時段 chip 可輕觸修改、按 ❌ 刪除，
+/// 並提供「+ 新增時段」按鈕。Vision 解析錯誤時，長輩可直接在此修正而不需重拍。
+///
+/// 視覺維持與舊版 `_TakeMedicineTimesCard` 一致：白底圓角、藍色 emoji 配色，
+/// 只是 Wrap 內每個 chip 多了一個 ❌ 圓鈕，並在最下方加上一條「+ 新增時段」row。
+class _EditableTimesCard extends StatelessWidget {
+  const _EditableTimesCard({
+    required this.times,
+    required this.onEdit,
+    required this.onAdd,
+    required this.onRemove,
   });
 
-  final String label;
-  final Color color;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: selected ? color : Colors.grey.shade200,
-      borderRadius: BorderRadius.circular(16),
-      elevation: selected ? 4 : 0,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: SizedBox(
-          height: 72,
-          child: Center(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-                color: selected ? Colors.white : Colors.black54,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _QuickDayChip extends StatelessWidget {
-  const _QuickDayChip({required this.label, required this.onTap});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: const Color(0xFFE3F2FD),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF0D47A1),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 推算日期的溫馨提示卡：說明這個日期是系統算出來的、不是藥單直接寫的。
-class _InferredHint extends StatelessWidget {
-  const _InferredHint({required this.days});
-
-  final int days;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: const Color(0xFFE65100).withValues(alpha: 0.3),
-          width: 1.2,
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('💡', style: TextStyle(fontSize: 22)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              '小幫手看到這包藥有 $days 天份，\n已經幫您自動推算下次拿藥日囉！',
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
-                height: 1.5,
-                color: Color(0xFFBF360C),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 每日吃藥時間 Card：顯示「⏰ 每日吃藥時間」+ 各時段的圖示 + HH:mm。
-///
-/// 採 [Wrap] 自動換行，避免時段多時擠在一起；每個時段用獨立的藥色膠囊包起來，
-/// 即使在小螢幕（5~6 吋）長輩手機上也不會擠到變形。
-class _TakeMedicineTimesCard extends StatelessWidget {
-  const _TakeMedicineTimesCard({required this.times});
-
   final List<String> times;
-
-  /// 依時段對應到生活化的圖示。
-  ///
-  /// - 早上：`08:00` / `09:00` → ☀️
-  /// - 中午：`11:30` / `13:00` → 🕛
-  /// - 傍晚：`18:00` / `19:00` → 🌙
-  /// - 睡前：`22:00` → 🛏️
-  /// - 其他不在表中：fallback ⏰
-  static String _emojiForTime(String time) {
-    switch (time) {
-      case '08:00':
-      case '09:00':
-        return '☀️';
-      case '11:30':
-      case '13:00':
-        return '🕛';
-      case '18:00':
-      case '19:00':
-        return '🌙';
-      case '22:00':
-        return '🛏️';
-      default:
-        return '⏰';
-    }
-  }
+  final Future<void> Function(int index) onEdit;
+  final Future<void> Function() onAdd;
+  final void Function(int index) onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -1033,25 +1013,77 @@ class _TakeMedicineTimesCard extends StatelessWidget {
             children: const [
               Text('⏰', style: TextStyle(fontSize: 28)),
               SizedBox(width: 10),
-              Text(
-                '每日吃藥時間',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: _HealthScanPageState._accentBlue,
-                  height: 1.3,
+              Expanded(
+                child: Text(
+                  '每日吃藥時間',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: _HealthScanPageState._accentBlue,
+                    height: 1.3,
+                  ),
                 ),
               ),
             ],
           ),
+          const SizedBox(height: 6),
+          const Text(
+            '輕觸時間可以修改；按右上 ❌ 刪除這個時段。',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.black54,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (times.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                '目前沒有設定時段，請按下方「＋ 新增時段」。',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFFBF360C),
+                ),
+              ),
+            )
+          else
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (int i = 0; i < times.length; i++)
+                  _EditableTimeChip(
+                    emoji: _emojiForTime(times[i]),
+                    time: times[i],
+                    onTap: () => onEdit(i),
+                    onRemove: () => onRemove(i),
+                  ),
+              ],
+            ),
           const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              for (final time in times)
-                _TimeChip(emoji: _emojiForTime(time), time: time),
-            ],
+          SizedBox(
+            height: 56,
+            child: OutlinedButton.icon(
+              onPressed: onAdd,
+              icon: const Icon(Icons.add_circle_outline, size: 24),
+              label: const Text(
+                '＋ 新增時段',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _HealthScanPageState._accentBlue,
+                side: const BorderSide(
+                  color: _HealthScanPageState._accentBlue,
+                  width: 2,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -1059,43 +1091,108 @@ class _TakeMedicineTimesCard extends StatelessWidget {
   }
 }
 
-/// 單一時段膠囊：圖示 + 24 小時制時間，字體 22pt 高對比。
-class _TimeChip extends StatelessWidget {
-  const _TimeChip({required this.emoji, required this.time});
+/// 單一可編輯時段：chip 本身 tap → 改時間；右上小圓鈕 → 刪除。
+///
+/// `Stack` + `Positioned` 把 ❌ 紅鈕「擠」到 chip 右上角外側，避免擋到時間
+/// 文字，也讓刪除目標夠大（直徑 28），長輩好按。
+class _EditableTimeChip extends StatelessWidget {
+  const _EditableTimeChip({
+    required this.emoji,
+    required this.time,
+    required this.onTap,
+    required this.onRemove,
+  });
 
   final String emoji;
   final String time;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFE3F2FD),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: _HealthScanPageState._accentBlue.withValues(alpha: 0.4),
-          width: 1.5,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(emoji, style: const TextStyle(fontSize: 24)),
-          const SizedBox(width: 8),
-          Text(
-            time,
-            style: const TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF0D47A1),
-              height: 1,
-              letterSpacing: 1,
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Material(
+          color: const Color(0xFFE3F2FD),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(
+              color: _HealthScanPageState._accentBlue.withValues(alpha: 0.4),
+              width: 1.5,
             ),
           ),
-        ],
-      ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(emoji, style: const TextStyle(fontSize: 24)),
+                  const SizedBox(width: 8),
+                  Text(
+                    time,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0D47A1),
+                      height: 1,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: -8,
+          right: -8,
+          child: Material(
+            color: const Color(0xFFC62828),
+            shape: const CircleBorder(),
+            elevation: 2,
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onRemove,
+              child: const SizedBox(
+                width: 28,
+                height: 28,
+                child: Icon(Icons.close, color: Colors.white, size: 18),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
+  }
+}
+
+/// 依時段對應到生活化的圖示。
+///
+/// - 早上：`08:00` / `09:00` → ☀️
+/// - 中午：`11:30` / `13:00` → 🕛
+/// - 傍晚：`18:00` / `19:00` → 🌙
+/// - 睡前：`22:00` → 🛏️
+/// - 其他不在表中：fallback ⏰
+String _emojiForTime(String time) {
+  switch (time) {
+    case '08:00':
+    case '09:00':
+      return '☀️';
+    case '11:30':
+    case '13:00':
+      return '🕛';
+    case '18:00':
+    case '19:00':
+      return '🌙';
+    case '22:00':
+      return '🛏️';
+    default:
+      return '⏰';
   }
 }
 
@@ -1282,17 +1379,13 @@ class _BigActionButton extends StatelessWidget {
 }
 
 class _TipCard extends StatelessWidget {
-  const _TipCard({
-    required this.icon,
-    required this.text,
-    this.backgroundColor,
-    this.textColor,
-  });
+  const _TipCard({required this.icon, required this.text});
+
+  static const Color _bg = Color(0xFFFFF3E0);
+  static const Color _fg = Color(0xFFBF360C);
 
   final String icon;
   final String text;
-  final Color? backgroundColor;
-  final Color? textColor;
 
   @override
   Widget build(BuildContext context) {
@@ -1300,12 +1393,9 @@ class _TipCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: backgroundColor ?? const Color(0xFFFFF3E0),
+        color: _bg,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: (textColor ?? const Color(0xFFE65100)).withValues(alpha: 0.3),
-          width: 1.5,
-        ),
+        border: Border.all(color: _fg.withValues(alpha: 0.3), width: 1.5),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1315,11 +1405,11 @@ class _TipCard extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w600,
                 height: 1.5,
-                color: textColor ?? const Color(0xFFBF360C),
+                color: _fg,
               ),
             ),
           ),

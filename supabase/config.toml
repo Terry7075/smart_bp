@@ -1,0 +1,3 @@
+# 本地開發用；部署時請在 Dashboard 設定 GEMINI_API_KEY
+[functions.process_prescription_vision]
+verify_jwt = true
