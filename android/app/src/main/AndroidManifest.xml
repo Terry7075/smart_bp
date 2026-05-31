@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- 健康處方籤 OCR 需使用相機 -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -11,6 +12,20 @@
     <!-- 通知音/震動以及鎖定螢幕也能收到提醒 -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!--
+        Android 12 (API 31) 之後，精準鬧鐘需要明確權限。
+        - USE_EXACT_ALARM：API 33+ 安裝時即授權，適用於醫療／鬧鐘類 App（本 App 為吃藥提醒符合資格）。
+        - SCHEDULE_EXACT_ALARM：API 31~32 的相容權限；如使用者撤銷可能需引導至設定。
+        缺少這兩者時，flutter_local_notifications 的 exactAllowWhileIdle 會被降級成 inexact，
+        導致吃藥提醒可能延遲 15 分鐘以上。
+    -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!--
+        鎖屏時以整頁通知搶出吃藥提醒（fullScreenIntent）。
+        Android 14 後對非通話 App 受限，但醫療／鬧鐘類提醒仍屬合理使用情境。
+    -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:label="smart_bp"
@@ -38,6 +53,9 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- google_sign_in: no extra activity needed, SDK handles OAuth internally -->
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
@@ -47,6 +65,27 @@
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="ocr_chinese" />
+
+        <!--
+            flutter_local_notifications：重新開機 / App 升級後恢復排程的 receiver。
+            缺少這兩個 receiver 註冊時，所有 zonedSchedule 出來的吃藥提醒
+            在使用者重啟手機後會全部消失。RECEIVE_BOOT_COMPLETED 權限只有
+            搭配下面這個 BootReceiver 才會被系統真的觸發。
+        -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false" />
+
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

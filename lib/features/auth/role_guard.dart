@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:smart_bp/features/profile/profile_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// 反向角色守門：確保「進到這頁的使用者」真的屬於 [requiredRole]。
 ///
@@ -36,23 +37,45 @@ class RoleGuard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncProfile = ref.watch(profileProvider);
 
-    // 監聽後續變化（例如 refresh 後拿到正確 role）
     ref.listen(profileProvider, (_, next) {
       _maybeRedirect(context, next);
     });
 
-    // 第一次 build 也要檢一次（資料可能已 ready 在 cache 裡）
     _maybeRedirect(context, asyncProfile);
 
-    // Loading / error 期間不擋畫面，照常顯示 child；真正錯誤角色時 _maybeRedirect
-    // 會把人帶走，這裡不另外渲染 splash 以免閃爍。
+    // profile 載入中 / 錯誤 / null / 角色不符時，不先 render 受保護畫面，
+    // 避免長輩／志工儀表板「閃一下」才跳走。
+    if (!_mayShowProtectedContent(asyncProfile)) {
+      return const _RoleGuardSplash();
+    }
+
     return child;
+  }
+
+  /// 是否可安全顯示 [child]：profile 已就緒、且 role 與本頁要求一致。
+  bool _mayShowProtectedContent(AsyncValue<Profile?> async) {
+    if (async.isLoading || async.hasError) return false;
+    final profile = async.value;
+    if (profile == null) return false;
+
+    final currentUid = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUid == null || profile.id != currentUid) return false;
+
+    return switch (requiredRole) {
+      RoleGuardTarget.elder => profile.isElder,
+      RoleGuardTarget.volunteer => profile.isVolunteer,
+      RoleGuardTarget.family => profile.isFamily,
+      RoleGuardTarget.admin => profile.isAdmin,
+    };
   }
 
   void _maybeRedirect(BuildContext context, AsyncValue<Profile?> async) {
     if (async.isLoading || async.hasError) return;
     final profile = async.value;
     if (profile == null) return;
+
+    final currentUid = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUid == null || profile.id != currentUid) return;
 
     final shouldBeHere = switch (requiredRole) {
       RoleGuardTarget.elder => profile.isElder,
@@ -75,3 +98,25 @@ class RoleGuard extends ConsumerWidget {
 }
 
 enum RoleGuardTarget { elder, volunteer, family, admin }
+
+/// 角色確認前的占位畫面（與 router 的 splash 風格一致）。
+class _RoleGuardSplash extends StatelessWidget {
+  const _RoleGuardSplash();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xFFFFF8E1),
+      body: Center(
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: CircularProgressIndicator(
+            strokeWidth: 4,
+            color: Color(0xFF2E7D32),
+          ),
+        ),
+      ),
+    );
+  }
+}

@@ -5,10 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
+import 'package:smart_bp/features/health_monitoring/presentation/volunteer_monitoring_tab.dart';
+import 'package:smart_bp/features/volunteer/volunteer_batch_refill_provider.dart';
+import 'package:smart_bp/features/volunteer/volunteer_batch_refill_tab.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+const Color _kVolunteerBlue = Color(0xFF1565C0);
+const Color _kBackgroundCream = Color(0xFFFFF8E1);
 
 /// 志工端透過 signed URL 下載照片時的有效期（秒）。
 ///
@@ -16,99 +22,110 @@ import 'package:url_launcher/url_launcher.dart';
 /// 被洩漏後可以一直被取用。
 const int _kPhotoSignedUrlSeconds = 60 * 60;
 
-/// 志工任務儀表板。
-///
-/// 顯示「待處理」+「我認領處理中」兩種狀態的任務清單，志工可在此：
-/// - 認領（pending → in_progress）
-/// - 撥打電話聯絡長輩
-/// - 標記完成（in_progress → done）
-/// - 下拉刷新
-class VolunteerDashboard extends ConsumerWidget {
+/// 志工任務儀表板（藥單協助 + 批次代領）。
+class VolunteerDashboard extends ConsumerStatefulWidget {
   const VolunteerDashboard({super.key});
 
-  static const Color _volunteerBlue = Color(0xFF1565C0);
-  static const Color _backgroundCream = Color(0xFFFFF8E1);
+  @override
+  ConsumerState<VolunteerDashboard> createState() => _VolunteerDashboardState();
+}
+
+class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refreshAll() async {
+    await Future.wait([
+      ref.read(volunteerTasksProvider.notifier).refresh(),
+      Future<void>.delayed(Duration.zero, () {
+        ref.invalidate(volunteerBatchRefillGroupsProvider);
+      }),
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final asyncTasks = ref.watch(volunteerTasksProvider);
 
     return RoleGuard(
       requiredRole: RoleGuardTarget.volunteer,
-      child: _buildScaffold(context, ref, asyncTasks),
-    );
-  }
-
-  Widget _buildScaffold(
-    BuildContext context,
-    WidgetRef ref,
-    AsyncValue<List<VolunteerTask>> asyncTasks,
-  ) {
-    return Scaffold(
-      backgroundColor: _backgroundCream,
-      appBar: AppBar(
-        backgroundColor: _volunteerBlue,
-        foregroundColor: Colors.white,
-        title: const Text(
-          '志工任務儀表板',
-          style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-        ),
-        centerTitle: true,
-        toolbarHeight: 72,
-        actions: [
-          IconButton(
-            tooltip: '重新整理',
-            icon: const Icon(Icons.refresh, size: 28),
-            onPressed: () =>
-                ref.read(volunteerTasksProvider.notifier).refresh(),
+      child: Scaffold(
+        backgroundColor: _kBackgroundCream,
+        appBar: AppBar(
+          backgroundColor: _kVolunteerBlue,
+          foregroundColor: Colors.white,
+          title: const Text(
+            '志工任務儀表板',
+            style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
           ),
-          IconButton(
-            tooltip: '個人資料',
-            icon: const Icon(Icons.person_outline, size: 28),
-            onPressed: () => context.push('/profile'),
-          ),
-          IconButton(
-            tooltip: '登出',
-            icon: const Icon(Icons.logout, size: 28),
-            onPressed: () => ref.read(authProvider.notifier).signOut(),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Card(
-                elevation: 2,
-                clipBehavior: Clip.antiAlias,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: ListTile(
-                  leading: const Icon(Icons.storefront,
-                      color: _volunteerBlue, size: 36),
-                  title: const Text(
-                    '物資／柑仔店代購',
-                    style:
-                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: const Text(
-                    '長輩送出之代購需求（試作入口）',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => context.push('/volunteer/shop-orders'),
-                ),
-              ),
+          centerTitle: true,
+          toolbarHeight: 72,
+          actions: [
+            IconButton(
+              tooltip: '重新整理',
+              icon: const Icon(Icons.refresh, size: 28),
+              onPressed: _refreshAll,
             ),
-            Expanded(
-              child: RefreshIndicator(
-                color: _volunteerBlue,
-                onRefresh: () =>
-                    ref.read(volunteerTasksProvider.notifier).refresh(),
+            IconButton(
+              tooltip: '物資／柑仔店代購',
+              icon: const Icon(Icons.storefront, size: 28),
+              onPressed: () => context.push('/volunteer/shop-orders'),
+            ),
+            IconButton(
+              tooltip: '學習內容管理',
+              icon: const Icon(Icons.library_add_outlined, size: 28),
+              onPressed: () => context.push('/volunteer-content-manage'),
+            ),
+            IconButton(
+              tooltip: '個人資料',
+              icon: const Icon(Icons.person_outline, size: 28),
+              onPressed: () => context.push('/profile'),
+            ),
+            IconButton(
+              tooltip: '登出',
+              icon: const Icon(Icons.logout, size: 28),
+              onPressed: () => ref.read(authProvider.notifier).signOut(),
+            ),
+            const SizedBox(width: 4),
+          ],
+          bottom: TabBar(
+            controller: _tabController,
+            indicatorColor: Colors.white,
+            indicatorWeight: 3,
+            labelStyle: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+            unselectedLabelStyle: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+            ),
+            tabs: const [
+              Tab(text: '藥單協助'),
+              Tab(text: '🛵 批次代領任務'),
+              Tab(text: '❤️ 長者監測'),
+            ],
+          ),
+        ),
+        body: SafeArea(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              RefreshIndicator(
+                color: _kVolunteerBlue,
+                onRefresh: _refreshAll,
                 child: asyncTasks.when(
                   loading: () => const _LoadingView(),
                   error: (e, _) => _ErrorView(
@@ -121,8 +138,14 @@ class VolunteerDashboard extends ConsumerWidget {
                       : _TaskListView(tasks: tasks),
                 ),
               ),
-            ),
-          ],
+              RefreshIndicator(
+                color: _kVolunteerBlue,
+                onRefresh: _refreshAll,
+                child: const VolunteerBatchRefillTab(),
+              ),
+              const VolunteerMonitoringTab(),
+            ],
+          ),
         ),
       ),
     );
@@ -149,7 +172,7 @@ class _LoadingView extends StatelessWidget {
             height: 64,
             child: CircularProgressIndicator(
               strokeWidth: 6,
-              color: VolunteerDashboard._volunteerBlue,
+              color: _kVolunteerBlue,
             ),
           ),
         ),
@@ -160,7 +183,7 @@ class _LoadingView extends StatelessWidget {
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
-              color: VolunteerDashboard._volunteerBlue,
+              color: _kVolunteerBlue,
             ),
           ),
         ),
@@ -204,7 +227,7 @@ class _ErrorView extends StatelessWidget {
             style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
           ),
           style: FilledButton.styleFrom(
-            backgroundColor: VolunteerDashboard._volunteerBlue,
+            backgroundColor: _kVolunteerBlue,
             padding: const EdgeInsets.symmetric(vertical: 16),
           ),
         ),
@@ -224,7 +247,7 @@ class _EmptyView extends StatelessWidget {
       children: const [
         SizedBox(height: 80),
         Icon(Icons.check_circle_outline,
-            size: 96, color: VolunteerDashboard._volunteerBlue),
+            size: 96, color: _kVolunteerBlue),
         SizedBox(height: 24),
         Text(
           '太棒了！\n目前沒有待處理的任務。',
@@ -232,7 +255,7 @@ class _EmptyView extends StatelessWidget {
           style: TextStyle(
             fontSize: 26,
             fontWeight: FontWeight.bold,
-            color: VolunteerDashboard._volunteerBlue,
+            color: _kVolunteerBlue,
             height: 1.5,
           ),
         ),
@@ -288,7 +311,7 @@ class _TaskCard extends ConsumerWidget {
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
           color: isInProgress
-              ? VolunteerDashboard._volunteerBlue
+              ? _kVolunteerBlue
               : Colors.transparent,
           width: 1.5,
         ),
@@ -361,7 +384,7 @@ class _TaskCard extends ConsumerWidget {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: VolunteerDashboard._volunteerBlue,
+                    color: _kVolunteerBlue,
                   ),
                 ),
               ),
@@ -410,7 +433,7 @@ class _StatusChip extends StatelessWidget {
         ),
       VolunteerTaskStatus.inProgress => (
           const Color(0xFFE3F2FD),
-          VolunteerDashboard._volunteerBlue
+          _kVolunteerBlue
         ),
       VolunteerTaskStatus.active => (
           const Color(0xFFE8F5E9),
@@ -485,7 +508,7 @@ class _TaskDetailSheetState extends ConsumerState<_TaskDetailSheet> {
         Navigator.of(context).pop();
         messenger.showSnackBar(
           const SnackBar(
-            backgroundColor: VolunteerDashboard._volunteerBlue,
+            backgroundColor: _kVolunteerBlue,
             duration: Duration(seconds: 4),
             content: Text(
               '✅ 已認領！記得儘快聯絡長輩確認藥單。',
@@ -635,7 +658,7 @@ class _TaskDetailSheetState extends ConsumerState<_TaskDetailSheet> {
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: VolunteerDashboard._volunteerBlue,
+                      color: _kVolunteerBlue,
                     ),
                   ),
                 ],
@@ -697,13 +720,13 @@ class _TaskDetailSheetState extends ConsumerState<_TaskDetailSheet> {
               if (task.isOpen)
                 _PrimaryButton(
                   label: '🙋 我接下這件任務',
-                  color: VolunteerDashboard._volunteerBlue,
+                  color: _kVolunteerBlue,
                   onPressed: _isWorking ? null : _claim,
                 ),
               if (isMine && task.status == VolunteerTaskStatus.inProgress) ...[
                 _PrimaryButton(
                   label: hasPhone ? '📞 撥打電話給長輩' : '📞 沒有電話可撥打',
-                  color: VolunteerDashboard._volunteerBlue,
+                  color: _kVolunteerBlue,
                   onPressed: _isWorking || !hasPhone ? null : _callElder,
                 ),
                 const SizedBox(height: 12),
@@ -741,7 +764,7 @@ class _TaskDetailSheetState extends ConsumerState<_TaskDetailSheet> {
                 color: Colors.black38,
                 child: Center(
                   child: CircularProgressIndicator(
-                    color: VolunteerDashboard._volunteerBlue,
+                    color: _kVolunteerBlue,
                     strokeWidth: 6,
                   ),
                 ),
@@ -855,7 +878,7 @@ class _TaskPhotoViewState extends State<_TaskPhotoView> {
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: CircularProgressIndicator(
-                  color: VolunteerDashboard._volunteerBlue,
+                  color: _kVolunteerBlue,
                 ),
               ),
             ),
@@ -910,7 +933,7 @@ class _TaskPhotoViewState extends State<_TaskPhotoView> {
                             ? progress.cumulativeBytesLoaded /
                                 progress.expectedTotalBytes!
                             : null,
-                        color: VolunteerDashboard._volunteerBlue,
+                        color: _kVolunteerBlue,
                       ),
                     ),
                   );
@@ -1089,6 +1112,7 @@ class _VerifyFormSheetState extends State<_VerifyFormSheet> {
   late final TextEditingController _hospitalController;
   DateTime? _pickupDate;
   final Set<String> _selectedTimes = <String>{};
+  bool _submitting = false;
 
   @override
   void initState() {
@@ -1139,6 +1163,8 @@ class _VerifyFormSheetState extends State<_VerifyFormSheet> {
   }
 
   void _submit() {
+    if (_submitting) return;
+
     final err = _validate();
     if (err != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1153,6 +1179,8 @@ class _VerifyFormSheetState extends State<_VerifyFormSheet> {
       );
       return;
     }
+
+    setState(() => _submitting = true);
 
     // 依預設選項順序輸出，符合「08:00 → 13:00 → 19:00 → 22:00」直覺排序。
     final orderedTimes = <String>[
@@ -1203,7 +1231,7 @@ class _VerifyFormSheetState extends State<_VerifyFormSheet> {
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
-                color: VolunteerDashboard._volunteerBlue,
+                color: _kVolunteerBlue,
               ),
             ),
             const SizedBox(height: 6),
@@ -1237,7 +1265,7 @@ class _VerifyFormSheetState extends State<_VerifyFormSheet> {
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide(
-                    color: VolunteerDashboard._volunteerBlue,
+                    color: _kVolunteerBlue,
                     width: 2,
                   ),
                 ),
@@ -1257,7 +1285,7 @@ class _VerifyFormSheetState extends State<_VerifyFormSheet> {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: _pickupDate != null
-                        ? VolunteerDashboard._volunteerBlue
+                        ? _kVolunteerBlue
                         : Colors.black26,
                     width: _pickupDate != null ? 2 : 1.4,
                   ),
@@ -1268,7 +1296,7 @@ class _VerifyFormSheetState extends State<_VerifyFormSheet> {
                       Icons.calendar_today_rounded,
                       size: 24,
                       color: _pickupDate != null
-                          ? VolunteerDashboard._volunteerBlue
+                          ? _kVolunteerBlue
                           : Colors.black54,
                     ),
                     const SizedBox(width: 12),
@@ -1313,7 +1341,7 @@ class _VerifyFormSheetState extends State<_VerifyFormSheet> {
               width: double.infinity,
               height: 72,
               child: FilledButton(
-                onPressed: _submit,
+                onPressed: _submitting ? null : _submit,
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF2E7D32),
                   foregroundColor: Colors.white,
@@ -1392,7 +1420,7 @@ class _SlotChoiceChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final activeColor = VolunteerDashboard._volunteerBlue;
+    final activeColor = _kVolunteerBlue;
     return InkWell(
       borderRadius: BorderRadius.circular(14),
       onTap: onTap,

@@ -10,6 +10,8 @@ import 'package:smart_bp/features/shop/presentation/shop_order_detail_page.dart'
 import 'package:smart_bp/features/auth/login_page.dart';
 import 'package:smart_bp/features/health_ocr/health_scan_page.dart';
 import 'package:smart_bp/features/home/presentation/home_page.dart';
+import 'package:smart_bp/features/learning/community_learning_page.dart';
+import 'package:smart_bp/features/learning/hakka_culture_page.dart';
 import 'package:smart_bp/features/medication/medication_checkin_page.dart';
 import 'package:smart_bp/features/profile/profile_page.dart';
 import 'package:smart_bp/features/profile/profile_provider.dart';
@@ -18,6 +20,7 @@ import 'package:smart_bp/features/shop/presentation/shop_elder_orders_page.dart'
 import 'package:smart_bp/features/assistant/presentation/assistant_chat_history_page.dart';
 import 'package:smart_bp/features/shop/presentation/shop_demand_input_page.dart';
 import 'package:smart_bp/features/shop/presentation/shop_price_page.dart';
+import 'package:smart_bp/features/volunteer/volunteer_content_manage.dart';
 import 'package:smart_bp/features/volunteer/volunteer_dashboard.dart';
 import 'package:smart_bp/features/volunteer/volunteer_shop_orders_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -154,6 +157,18 @@ GoRouter get appRouter =>
           builder: (context, state) => const HealthScanPage(),
         ),
         GoRoute(
+          path: '/community-learning',
+          builder: (context, state) => const CommunityLearningPage(),
+        ),
+        GoRoute(
+          path: '/hakka-culture',
+          builder: (context, state) => const HakkaCulturePage(),
+        ),
+        GoRoute(
+          path: '/volunteer-content-manage',
+          builder: (context, state) => const VolunteerContentManagePage(),
+        ),
+        GoRoute(
           path: '/profile',
           builder: (context, state) => const ProfilePage(),
         ),
@@ -202,17 +217,23 @@ class _RoleDecisionPageState extends ConsumerState<_RoleDecisionPage> {
     if (async.hasError) return;
 
     final profile = async.value;
-    final target = switch (profile?.role) {
+    if (profile == null) return;
+
+    final currentUid = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUid == null || profile.id != currentUid) return;
+
+    final target = switch (profile.role) {
       Profile.kRoleVolunteer => '/volunteer-dashboard',
       Profile.kRoleFamily => '/family/home',
       Profile.kRoleAdmin => '/admin/dashboard',
       _ => '/home',
     };
 
-    _navigated = true;
-    // 用 post-frame 跳轉，確保不會在 build/listen 同步階段觸發 navigation。
+    // 導航成功後才設 _navigated，避免 post-frame 時 widget 已 dispose 卻永遠卡住 splash。
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.go(target);
+      if (!mounted) return;
+      _navigated = true;
+      context.go(target);
     });
   }
 

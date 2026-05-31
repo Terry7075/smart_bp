@@ -1,33 +1,39 @@
+import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 /// 通知排程結果（給呼叫端做使用者回饋用）。
 ///
-/// - [granted] 是否取得通知權限。
-/// - [medicationCount] 已成功排定的「每日服藥提醒」筆數。
-/// - [pickupScheduled] 是否成功排定「下次領藥日提醒」。
+/// 長輩端僅排程「每日吃藥時段」；領藥物流由志工端處理，不再排本機領藥鬧鐘。
 class NotificationScheduleResult {
   const NotificationScheduleResult({
     required this.granted,
     required this.medicationCount,
-    required this.pickupScheduled,
   });
 
   final bool granted;
   final int medicationCount;
-  final bool pickupScheduled;
 
-  bool get hasAnyScheduled => medicationCount > 0 || pickupScheduled;
+  bool get hasAnyScheduled => medicationCount > 0;
 }
 
-/// 吃藥提醒 payload：`mindu_checkin|<prescriptionId>|<HH:mm>`
+/// 吃藥提醒 payload（**舊**格式前綴）：`mindu_checkin|<prescriptionId>|<HH:mm>`
 ///
-/// 舊格式相容：`medication:HH:mm`（無藥單 ID）仍可解析時間但不會帶 prescription。
+/// 新版改用 JSON（見 [_buildCheckinPayload]）；此前綴僅保留給「升級前已排程、
+/// 尚未觸發」的舊通知做向後相容解析。
 const String kPayloadMinduCheckinPrefix = 'mindu_checkin|';
+
+/// 健康告警通知 payload（**舊**格式前綴）：`health_alert|<elderId>`
+const String kPayloadHealthAlertPrefix = 'health_alert|';
+
+/// payload JSON 的 type 值。
+const String _kTypeCheckin = 'mindu_checkin';
+const String _kTypeHealthAlert = 'health_alert';
 
 /// 「明德 e 達人」本機通知排程服務（單例）。
 ///
@@ -46,23 +52,64 @@ class NotificationService {
   /// 由 App 注入：`go('/path')` 之類，通常綁 [GoRouter.go]。
   void Function(String location)? _navigate;
 
+  /// 在 [_navigate] 尚未綁定時收到的通知點擊，先暫存待綁定後補跳。
+  ///
+  /// 為什麼需要？冷啟動時「點通知 → App 啟動 → handleLaunchNotificationIfAny」
+  /// 與 main.dart 內 `bindNavigate` 都掛在 post-frame callback，順序不保證；
+  /// 若點擊先到、_navigate 還是 null，原本的 `_navigate?.call()` 會直接被丟掉，
+  /// 長輩點了通知卻停在首頁。改成暫存後，bind 完成立刻補跳。
+  String? _pendingRoute;
+
   void bindNavigate(void Function(String location) navigate) {
     _navigate = navigate;
+    final pending = _pendingRoute;
+    if (pending != null) {
+      _pendingRoute = null;
+      navigate(pending);
+    }
+  }
+
+  /// 導航：已綁定就直接跳，否則暫存待 [bindNavigate] 後補跳。
+  void _go(String route) {
+    final nav = _navigate;
+    if (nav != null) {
+      nav(route);
+    } else {
+      _pendingRoute = route;
+    }
   }
 
   void handleNotificationTap(NotificationResponse response) {
     final payload = response.payload;
     if (payload == null || payload.isEmpty) return;
 
+    // 1) 新版 JSON 格式。
+    final decoded = _tryDecodePayload(payload);
+    if (decoded != null) {
+      switch (decoded['type']) {
+        case _kTypeCheckin:
+          final rxId = decoded['rx']?.toString() ?? '';
+          final slot = decoded['slot']?.toString() ?? '';
+          if (rxId.isEmpty) return;
+          _goCheckin(rxId, slot);
+          return;
+        case _kTypeHealthAlert:
+          _go('/');
+          return;
+      }
+    }
+
+    // 2) 舊版 pipe 格式（升級前已排程、尚未觸發的通知）。
     if (payload.startsWith(kPayloadMinduCheckinPrefix)) {
       final rest = payload.substring(kPayloadMinduCheckinPrefix.length);
       final sep = rest.lastIndexOf('|');
       if (sep <= 0 || sep >= rest.length - 1) return;
-      final rxId = rest.substring(0, sep);
-      final slotTime = rest.substring(sep + 1);
-      final encRx = Uri.encodeComponent(rxId);
-      final encSlot = Uri.encodeComponent(slotTime);
-      _navigate?.call('/medication-checkin?prescriptionId=$encRx&slotTime=$encSlot');
+      _goCheckin(rest.substring(0, sep), rest.substring(sep + 1));
+      return;
+    }
+
+    if (payload.startsWith(kPayloadHealthAlertPrefix)) {
+      _go('/');
       return;
     }
 
@@ -80,6 +127,28 @@ class NotificationService {
       }
     }
   }
+
+  void _goCheckin(String rxId, String slotTime) {
+    final encRx = Uri.encodeComponent(rxId);
+    final encSlot = Uri.encodeComponent(slotTime);
+    _go('/medication-checkin?prescriptionId=$encRx&slotTime=$encSlot');
+  }
+
+  Map<String, dynamic>? _tryDecodePayload(String payload) {
+    if (!payload.startsWith('{')) return null;
+    try {
+      final decoded = jsonDecode(payload);
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _buildCheckinPayload(String prescriptionId, String slot) =>
+      jsonEncode({'type': _kTypeCheckin, 'rx': prescriptionId, 'slot': slot});
+
+  static String _buildHealthAlertPayload(String? elderId) =>
+      jsonEncode({'type': _kTypeHealthAlert, 'elder': elderId ?? ''});
 
   Future<void> handleLaunchNotificationIfAny() async {
     if (!_initialized) await init();
@@ -109,8 +178,13 @@ class NotificationService {
   /// 每張藥單最多排的「吃藥時段」數（對應連續 notification id）。
   static const int maxMedicationSlotsPerPrescription = 12;
 
-  /// 領藥提醒與吃藥時段 id 的固定位移（避免碰撞）。
-  static const int _pickupIdOffset = 40;
+  /// 取消時清掃的 id 範圍（**必須 ≥ 任何歷史版本的 max**）。
+  ///
+  /// 為什麼跟 [maxMedicationSlotsPerPrescription] 分開？
+  /// - 若哪天把 max 調小（例如 12 → 6），舊版用 base+6..base+11 排的提醒
+  ///   就會落在新的取消迴圈範圍外、永遠清不掉，造成殘留鬧鐘。
+  /// - 用一個固定且偏大的清掃範圍（24）涵蓋所有歷史值，永遠安全。
+  static const int _cancelSlotRange = 24;
 
   /// 由 [prescriptionId] 推導穩定的 base notification id（31-bit 正整數）。
   ///
@@ -126,20 +200,23 @@ class NotificationService {
     return minBase + (h % 2100000000);
   }
 
-  /// 這張藥單所有可能用到的通知 id（吃藥 × N + 領藥 × 1）。
+  /// 這張藥單目前排程會用到的通知 id（僅吃藥時段）。
   static List<int> allNotificationIdsFor(String prescriptionId) {
     final base = baseNotificationId(prescriptionId);
-    return [
-      ...List.generate(maxMedicationSlotsPerPrescription, (i) => base + i),
-      base + _pickupIdOffset,
-    ];
+    return List.generate(
+      maxMedicationSlotsPerPrescription,
+      (i) => base + i,
+    );
+  }
+
+  /// 取消時要清掃的通知 id（範圍比排程用的 max 大，涵蓋歷史殘留）。
+  static List<int> _cancelNotificationIdsFor(String prescriptionId) {
+    final base = baseNotificationId(prescriptionId);
+    return List.generate(_cancelSlotRange, (i) => base + i);
   }
 
   static int medicationNotificationId(String prescriptionId, int slotIndex) =>
       baseNotificationId(prescriptionId) + slotIndex;
-
-  static int pickupNotificationId(String prescriptionId) =>
-      baseNotificationId(prescriptionId) + _pickupIdOffset;
 
   Future<void> init() async {
     if (_initialized) return;
@@ -178,6 +255,15 @@ class NotificationService {
           AndroidFlutterLocalNotificationsPlugin>();
       if (android == null) return false;
       final granted = await android.requestNotificationsPermission();
+      // Android 12+：另外請求「精準鬧鐘」授權。沒這個就算 POST_NOTIFICATIONS
+      // 拿到了，exactAllowWhileIdle 仍會被降級成 inexact，吃藥提醒可能延遲。
+      // requestExactAlarmsPermission 內部會看 manifest 有沒有 USE_EXACT_ALARM
+      // （API 33+ 自動授權）或 SCHEDULE_EXACT_ALARM（會跳系統設定畫面）。
+      try {
+        await android.requestExactAlarmsPermission();
+      } catch (e) {
+        debugPrint('[NotificationService] requestExactAlarmsPermission: $e');
+      }
       return granted ?? true;
     }
 
@@ -244,33 +330,26 @@ class NotificationService {
     await _plugin.cancelAll();
   }
 
-  /// 僅移除與 [prescriptionId] 相關的排程（吃藥時段 + 領藥日）。
+  /// 僅移除與 [prescriptionId] 相關的吃藥時段排程。
   Future<void> cancelRemindersByPrescriptionId(String prescriptionId) async {
     if (!_initialized) await init();
     if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) return;
 
-    for (final notificationId in allNotificationIdsFor(prescriptionId)) {
+    for (final notificationId in _cancelNotificationIdsFor(prescriptionId)) {
       await _plugin.cancel(id: notificationId);
     }
   }
 
-  /// 為單張藥單排程：
-  /// 1. 先 [cancelRemindersByPrescriptionId]（同一張藥單重複按「完成」時覆蓋舊排程）。
-  /// 2. 取得通知權限。
-  /// 3. 每日吃藥提醒（payload 導向打卡頁）。
-  /// 4. 領藥日單次提醒。
+  /// 為單張藥單排程每日吃藥提醒（payload 導向打卡頁）。
   Future<NotificationScheduleResult> schedulePrescriptionReminders({
     required String prescriptionId,
     required List<String> takeMedicineTimes,
-    DateTime? pickupDate,
-    String? hospitalName,
   }) async {
     if (!_initialized) await init();
     if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) {
       return const NotificationScheduleResult(
         granted: false,
         medicationCount: 0,
-        pickupScheduled: false,
       );
     }
 
@@ -281,7 +360,6 @@ class NotificationService {
       return const NotificationScheduleResult(
         granted: false,
         medicationCount: 0,
-        pickupScheduled: false,
       );
     }
 
@@ -289,18 +367,10 @@ class NotificationService {
       prescriptionId: prescriptionId,
       times: takeMedicineTimes,
     );
-    final pickupOk = pickupDate != null
-        ? await _schedulePickupReminder(
-            prescriptionId: prescriptionId,
-            pickupDate: pickupDate,
-            hospitalName: hospitalName,
-          )
-        : false;
 
     return NotificationScheduleResult(
       granted: true,
       medicationCount: medicationCount,
-      pickupScheduled: pickupOk,
     );
   }
 
@@ -315,11 +385,13 @@ class NotificationService {
         _medicationChannelId,
         _medicationChannelName,
         channelDescription: _medicationChannelDesc,
-        importance: Importance.high,
-        priority: Priority.high,
+        importance: Importance.max,
+        priority: Priority.max,
         playSound: true,
         enableVibration: true,
-        category: AndroidNotificationCategory.reminder,
+        category: AndroidNotificationCategory.alarm,
+        // 鎖屏時也用整頁提醒搶出來，避免長輩錯過吃藥（醫療提醒屬合理使用）。
+        fullScreenIntent: true,
       ),
       iOS: const DarwinNotificationDetails(
         presentAlert: true,
@@ -336,8 +408,7 @@ class NotificationService {
 
       final fireAt = _nextInstanceOfTime(hm.$1, hm.$2);
       final nid = medicationNotificationId(prescriptionId, i);
-      final payload =
-          '$kPayloadMinduCheckinPrefix$prescriptionId|${times[i]}';
+      final payload = _buildCheckinPayload(prescriptionId, times[i]);
 
       try {
         await _plugin.zonedSchedule(
@@ -346,76 +417,48 @@ class NotificationService {
           body: '到了 ${times[i]} 該吃這包藥了，記得配溫水慢慢吃。',
           scheduledDate: fireAt,
           notificationDetails: details,
-          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          // 用 exactAllowWhileIdle：醫療提醒必須準時叮咚，不能被 doze 延遲。
+          // 對應的 USE_EXACT_ALARM / SCHEDULE_EXACT_ALARM 已在 AndroidManifest 宣告，
+          // 並在 requestPermission() 內主動申請。
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
           matchDateTimeComponents: DateTimeComponents.time,
           payload: payload,
         );
         scheduled++;
+      } on PlatformException catch (e, st) {
+        // 沒有精準鬧鐘權限時，Android 會丟 exact_alarms_not_permitted；
+        // 降級成 inexact 再排一次，避免完全沒提醒。
+        if (e.code == 'exact_alarms_not_permitted') {
+          debugPrint(
+            '[NotificationService] 精準鬧鐘權限被拒，改用 inexact 排程 ${times[i]}',
+          );
+          try {
+            await _plugin.zonedSchedule(
+              id: nid,
+              title: '⏰ 吃藥時間到囉！',
+              body: '到了 ${times[i]} 該吃這包藥了，記得配溫水慢慢吃。',
+              scheduledDate: fireAt,
+              notificationDetails: details,
+              androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+              matchDateTimeComponents: DateTimeComponents.time,
+              payload: payload,
+            );
+            scheduled++;
+          } catch (e2, st2) {
+            debugPrint(
+              '[NotificationService] 服藥提醒 inexact fallback 仍失敗 ${times[i]}: $e2\n$st2',
+            );
+          }
+        } else {
+          debugPrint(
+            '[NotificationService] 服藥提醒排程失敗 ${times[i]}: $e\n$st',
+          );
+        }
       } catch (e, st) {
         debugPrint('[NotificationService] 服藥提醒排程失敗 ${times[i]}: $e\n$st');
       }
     }
     return scheduled;
-  }
-
-  Future<bool> _schedulePickupReminder({
-    required String prescriptionId,
-    required DateTime pickupDate,
-    String? hospitalName,
-  }) async {
-    final fireAt = tz.TZDateTime(
-      tz.local,
-      pickupDate.year,
-      pickupDate.month,
-      pickupDate.day,
-      9,
-    );
-
-    final now = tz.TZDateTime.now(tz.local);
-    if (!fireAt.isAfter(now)) {
-      debugPrint(
-        '[NotificationService] 領藥日已過，不排程：$pickupDate (now=$now)',
-      );
-      return false;
-    }
-
-    final body = (hospitalName != null && hospitalName.trim().isNotEmpty)
-        ? '今天記得回 $hospitalName 拿藥喔！別忘了帶健保卡。'
-        : '今天是回診拿藥的日子，記得別忘了帶健保卡喔！';
-
-    final nid = pickupNotificationId(prescriptionId);
-    final payload = 'mindu_pickup|$prescriptionId';
-
-    try {
-      await _plugin.zonedSchedule(
-        id: nid,
-        title: '💊 今天該回診領藥囉！',
-        body: body,
-        scheduledDate: fireAt,
-        notificationDetails: const NotificationDetails(
-          android: AndroidNotificationDetails(
-            _pickupChannelId,
-            _pickupChannelName,
-            channelDescription: _pickupChannelDesc,
-            importance: Importance.max,
-            priority: Priority.high,
-            category: AndroidNotificationCategory.reminder,
-          ),
-          iOS: DarwinNotificationDetails(
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
-            interruptionLevel: InterruptionLevel.timeSensitive,
-          ),
-        ),
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        payload: payload,
-      );
-      return true;
-    } catch (e, st) {
-      debugPrint('[NotificationService] 領藥日提醒排程失敗：$e\n$st');
-      return false;
-    }
   }
 
   (int, int)? _parseHourMinute(String value) {
@@ -442,5 +485,55 @@ class NotificationService {
       scheduled = scheduled.add(const Duration(days: 1));
     }
     return scheduled;
+  }
+
+  // --------------------------------------------------------------------------
+  // 健康告警通知（outbox → 本機通知）
+  // --------------------------------------------------------------------------
+
+  static const String _healthAlertChannelId = 'mindu_health_alert';
+  static const String _healthAlertChannelName = '長輩健康告警';
+
+  static int _healthAlertNotificationId(String outboxId) {
+    var h = 0;
+    for (final unit in outboxId.codeUnits) {
+      h = 0x1fffffff & (h * 31 + unit);
+    }
+    return 0x40000000 | (h & 0x3fffffff); // 高位元確保不與藥單 id 撞
+  }
+
+  /// 顯示一則健康告警即時通知，並可透過 [elderId] 導航到監測 Tab。
+  Future<void> showHealthAlert({
+    required String outboxId,
+    required String title,
+    required String body,
+    String? elderId,
+  }) async {
+    if (!_initialized) await init();
+    if (kIsWeb) return;
+    if (!Platform.isAndroid && !Platform.isIOS) return;
+
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        _healthAlertChannelId,
+        _healthAlertChannelName,
+        importance: Importance.high,
+        priority: Priority.high,
+        icon: '@mipmap/ic_launcher',
+      ),
+      iOS: DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      ),
+    );
+
+    await _plugin.show(
+      id: _healthAlertNotificationId(outboxId),
+      title: title,
+      body: body,
+      notificationDetails: details,
+      payload: _buildHealthAlertPayload(elderId),
+    );
   }
 }

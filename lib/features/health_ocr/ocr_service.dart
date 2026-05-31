@@ -22,8 +22,14 @@ class PrescriptionResult {
     this.medicationDays,
     this.isInferred = false,
     this.takeMedicineTimes = const <String>[],
+    this.medicationNames = const <String>[],
+    this.pillAppearance,
     this.imagePath,
+    this.prescriptionId,
   });
+
+  /// 雲端 Vision 流程已寫入的 `prescriptions.id`（確認時勿重複 insert）。
+  final String? prescriptionId;
 
   /// ML Kit OCR 辨識出的整段原始文字（保留原始換行）。
   final String rawText;
@@ -57,6 +63,39 @@ class PrescriptionResult {
   /// 範例：`['09:00', '13:00', '19:00']` 表示一日三餐飯後服用。
   /// 若無法解析（藥單沒寫或 OCR 不清）則為空陣列。
   final List<String> takeMedicineTimes;
+
+  /// 藥丸外觀／形狀／顏色描述（例如「粉紅/圓形」）；辨識不到為 `null`。
+  final String? pillAppearance;
+
+  /// OCR 擷取到的藥品名稱（可能多種，已去重）。
+  final List<String> medicationNames;
+
+  /// 寫入 DB 用：多種藥以「、」串成一行。
+  String? get combinedMedicationName =>
+      medicationNames.isEmpty ? null : medicationNames.join('、');
+
+  /// 顯示／畫圖用：外觀欄位或從藥名推斷。
+  String get effectivePillAppearance {
+    final p = pillAppearance?.trim();
+    if (p != null && p.isNotEmpty) return p;
+    return _inferPillHintFromNames(medicationNames);
+  }
+
+  static String _inferPillHintFromNames(List<String> names) {
+    final text = names.join('');
+    if (text.isEmpty) return '';
+    final buf = StringBuffer();
+    for (final c in ['粉紅', '紅', '白', '黃', '藍', '綠']) {
+      if (text.contains(c)) buf.write(c);
+    }
+    for (final s in ['圓', '橢圓', '長', '膠囊', '錠']) {
+      if (text.contains(s)) {
+        if (buf.isNotEmpty) buf.write('/');
+        buf.write(s);
+      }
+    }
+    return buf.toString();
+  }
 
   /// 是否成功抓到日期：用來判斷 UI 要走 Success 或 NoDate 狀態。
   bool get hasDate => pickupDate != null;
@@ -159,10 +198,73 @@ class OcrService {
   static final RegExp _frequencyRegExp =
       RegExp(r'一\s*[天日]\s*(\d+)\s*次');
 
+  /// 中文標籤「外觀：」後描述（僅在通過 [_isUsableAppearanceText] 時採用）。
+  static final RegExp _pillAppearanceLabelRegExp = RegExp(
+    r'(?:外觀|形狀|顏色|特徵)\s*[:：]\s*([^\n]+)',
+  );
+
+  /// 台灣醫院藥袋常見：「錠劑、長橢圓形、白色」同一行（優先於英文 Appearance）。
+  static final RegExp _twTabletAppearanceRegExp = RegExp(
+    r'(?:錠劑|膜衣錠|糖衣錠|膠囊|粒)'
+    r'[、,，\s]*'
+    r'((?:長)?橢圓形?|圓形?|長形)'
+    r'[、,，\s]*'
+    r'(白色?|粉紅色?|黃色?|紅色?|藍色?|綠色?|橘色?|橙色?)',
+  );
+
+  /// 「粉紅/圓形」「白色圓形錠」等常見寫法。
+  static final RegExp _pillSlashRegExp = RegExp(
+    r'(粉紅色?|紅色?|白色?|黃色?|藍色?|綠色?|橘色?|橙色?)\s*[\/／]\s*(圓形?|橢圓形?|長形?|膠囊|錠)',
+  );
+
+  static final RegExp _pillCompactRegExp = RegExp(
+    r'(粉紅|白|黃|藍|綠|紅|橘|橙)(色)?(圓|橢圓|長)(形)?(錠|膠囊)?',
+  );
+
+  /// 藥品名稱標籤行。
+  static final RegExp _drugLabelRegExp = RegExp(
+    r'(?:藥\s*品\s*名\s*稱|藥\s*名|品\s*名)\s*[:：]?\s*([^\n]+)',
+  );
+
+  /// 藥袋商品名：(跌)【40mg】Olmetec 雅脈 (Olmesartan)
+  static final RegExp _brandDrugLineRegExp = RegExp(
+    r'[\(（][^)）]{1,12}[)）]?\s*'
+    r'(?:【\s*\d+\s*mg\s*】)?\s*'
+    r'[A-Za-z01OlI]{3,24}\s*'
+    r'[\u4e00-\u9fff]{2,12}'
+    r'(?:\s*\([A-Za-z][A-Za-z\s\-]+\))?',
+    caseSensitive: false,
+  );
+
+  /// 英文副作用關鍵字（藥袋上常誤印在 Appearance 欄，需排除）。
+  static final RegExp _sideEffectEnglishRegExp = RegExp(
+    r'\b(?:dizz|headache|bronchi|diarrhea|hematur|hyperlip|nausea|vomit|'
+    r'rash|pruritus|fatigue|cough|insomnia|may\s+occur|side\s+effect)\b',
+    caseSensitive: false,
+  );
+
+  /// 含劑型關鍵字的藥品行（錠、膠囊、mg 等）。
+  static final RegExp _drugLineRegExp = RegExp(
+    r'^[\u4e00-\u9fffA-Za-z0-9\-\+\(\)（）·\s]{2,48}'
+    r'(?:錠|膜衣錠|膠囊|粒|粉劑|注射液|軟膏|貼片)'
+    r'(?:\s*\d+\s*(?:mg|毫克|mcg|公克|gm|g|ml|mL))?',
+    caseSensitive: false,
+  );
+
+  /// 中文藥名 + 劑量（例：普拿疼 500mg）。
+  static final RegExp _drugWithDoseRegExp = RegExp(
+    r'^([\u4e00-\u9fff]{2,12})\s+\d+\s*(?:mg|毫克|mcg|公克|gm|g)\b',
+    caseSensitive: false,
+  );
+
   /// 根據來源（相機 / 相簿）取得照片並進行 OCR 辨識與後處理。
   ///
   /// [source] 決定是要開啟相機還是從相簿挑選照片。
   /// 若使用者取消取得照片，會回傳 `null`，方便上層保持在 Idle 狀態。
+  ///
+  /// 注意：production 用的「OCR + LLM」雙階段流程改走
+  /// [PrescriptionVisionService.processImage]，會呼叫 [extractRawText] 拿純文字
+  /// 再交給 Gemini 結構化。這個方法保留給離線測試與單元測試用。
   Future<PrescriptionResult?> processImage(ImageSource source) async {
     _ensureSupportedPlatform();
 
@@ -175,21 +277,36 @@ class OcrService {
       return null;
     }
 
-    final TextRecognizer textRecognizer = TextRecognizer(
+    final rawText = await extractRawText(pickedFile.path);
+    return _parsePrescription(
+      rawText,
+      now: DateTime.now(),
+      imagePath: pickedFile.path,
+    );
+  }
+
+  /// 純 ML Kit 文字辨識：只做「圖片 → 文字」，不做任何 regex 抽取。
+  ///
+  /// 給 [PrescriptionVisionService] 在雙階段流程裡呼叫——本地端先把藥單照片
+  /// 變成純文字，再把純文字（不是圖片）丟給 Gemini 結構化解析。這樣可以：
+  /// - 不必上傳大張照片到 Storage / Gemini API
+  /// - 改走 Gemini 的「文字模式」配額，較不容易 503 過載
+  /// - 把隱私敏感的圖像處理留在裝置端
+  ///
+  /// [imagePath] 必須是本機檔案路徑（[XFile.path] 或 [PickedFile.path]）。
+  /// 在 Web / 桌面平台呼叫會拋 [UnsupportedError]（ML Kit 沒實作）。
+  Future<String> extractRawText(String imagePath) async {
+    _ensureSupportedPlatform();
+
+    final recognizer = TextRecognizer(
       script: TextRecognitionScript.chinese,
     );
-
     try {
-      final InputImage inputImage = InputImage.fromFilePath(pickedFile.path);
-      final RecognizedText recognizedText =
-          await textRecognizer.processImage(inputImage);
-      return _parsePrescription(
-        recognizedText.text,
-        now: DateTime.now(),
-        imagePath: pickedFile.path,
-      );
+      final input = InputImage.fromFilePath(imagePath);
+      final result = await recognizer.processImage(input);
+      return result.text;
     } finally {
-      await textRecognizer.close();
+      await recognizer.close();
     }
   }
 
@@ -214,6 +331,8 @@ class OcrService {
   }) {
     final hospital = _extractHospital(rawText);
     final takeTimes = _extractTakeMedicineTimes(rawText);
+    final medicationNames = _extractMedicationNames(rawText);
+    final pillAppearance = _extractPillAppearance(rawText, medicationNames);
 
     final directDate = _extractRocDate(rawText);
     if (directDate != null) {
@@ -222,6 +341,8 @@ class OcrService {
         hospitalName: hospital,
         pickupDate: directDate,
         takeMedicineTimes: takeTimes,
+        medicationNames: medicationNames,
+        pillAppearance: pillAppearance,
         imagePath: imagePath,
       );
     }
@@ -236,6 +357,8 @@ class OcrService {
         medicationDays: days,
         isInferred: true,
         takeMedicineTimes: takeTimes,
+        medicationNames: medicationNames,
+        pillAppearance: pillAppearance,
         imagePath: imagePath,
       );
     }
@@ -244,8 +367,197 @@ class OcrService {
       rawText: rawText,
       hospitalName: hospital,
       takeMedicineTimes: takeTimes,
+      medicationNames: medicationNames,
+      pillAppearance: pillAppearance,
       imagePath: imagePath,
     );
+  }
+
+  /// 從 OCR 擷取藥品名稱（最多 4 種）。
+  List<String> _extractMedicationNames(String rawText) {
+    final found = <String>[];
+    final seen = <String>{};
+
+    void addName(String raw) {
+      final name = _normalizeDrugName(raw);
+      if (name.isEmpty || seen.contains(name)) return;
+      seen.add(name);
+      found.add(name);
+    }
+
+    for (final m in _drugLabelRegExp.allMatches(rawText)) {
+      final v = m.group(1)?.trim();
+      if (v != null && v.length >= 2) addName(v);
+    }
+
+    for (final rawLine in rawText.split('\n')) {
+      final line = rawLine.trim();
+      if (line.length < 3) continue;
+      if (_hospitalLineRegExp.hasMatch(line)) continue;
+      if (_rocDateRegExp.hasMatch(line)) continue;
+      if (line.contains('領藥') || (line.contains('處方') && line.length < 8)) {
+        continue;
+      }
+      if (_isSideEffectLine(line) || line.contains('警語') || line.contains('副作用')) {
+        continue;
+      }
+
+      final brand = _brandDrugLineRegExp.firstMatch(line);
+      if (brand != null) {
+        addName(brand.group(0)!);
+        continue;
+      }
+
+      final doseMatch = _drugWithDoseRegExp.firstMatch(line);
+      if (doseMatch != null) {
+        addName(doseMatch.group(1)!);
+        continue;
+      }
+
+      if (_drugLineRegExp.hasMatch(line)) {
+        addName(line);
+      }
+    }
+
+    if (found.length <= 4) return found;
+    return found.sublist(0, 4);
+  }
+
+  /// 修正 OCR 常見誤字（如 01metec → Olmetec）。
+  String _normalizeDrugName(String raw) {
+    var s = _cleanDrugName(raw);
+    if (s.isEmpty) return s;
+
+    s = s.replaceAll(RegExp(r'\b01metec\b', caseSensitive: false), 'Olmetec');
+    s = s.replaceAll(RegExp(r'\b0lmetec\b', caseSensitive: false), 'Olmetec');
+    s = s.replaceAll(RegExp(r'\bO1metec\b'), 'Olmetec');
+
+    // 去掉尾端劑量殘留與「共 N 顆」。
+    s = s.replaceFirst(RegExp(r'\s*共\s*\d+\s*顆.*$'), '');
+    s = s.replaceFirst(RegExp(r'\s+\d+\s*排\d+\s*顆.*$'), '');
+
+    if (s.length > 48) s = '${s.substring(0, 48)}…';
+    return s.trim();
+  }
+
+  String _cleanDrugName(String raw) {
+    var s = raw.trim();
+    s = s.replaceAll(RegExp(r'\s+'), ' ');
+    return s;
+  }
+
+  bool _isSideEffectLine(String line) =>
+      _sideEffectEnglishRegExp.hasMatch(line) ||
+      line.contains('可能發生') ||
+      line.contains('Do not take');
+
+  /// 外觀文字是否可用（排除英文副作用欄與 OCR 雜訊）。
+  bool _isUsableAppearanceText(String text) {
+    final t = text.trim();
+    if (t.length < 2) return false;
+    if (_isSideEffectLine(t)) return false;
+
+    final cjkCount = RegExp(r'[\u4e00-\u9fff]').allMatches(t).length;
+    final hasShapeColor = RegExp(
+      r'白|粉紅|紅|黃|藍|綠|橘|橙|圓|橢圓|長|錠|膠囊',
+    ).hasMatch(t);
+
+    if (cjkCount == 0 && !hasShapeColor) return false;
+
+    // 像「。体nd」這種幾乎沒有中文的碎片直接丟棄。
+    if (cjkCount == 0 && t.length < 6) return false;
+    if (RegExp(r'^[。．\s\.,;:!?\-a-zA-Z0-9]{1,10}$').hasMatch(t)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /// 從單行文字組出「顏色/形狀」外觀描述。
+  String? _appearanceFromShapeColor(String shape, String color) {
+    final s = shape.trim();
+    final c = color.trim();
+    if (s.isEmpty && c.isEmpty) return null;
+    if (s.isNotEmpty && c.isNotEmpty) return '$c/$s';
+    return s.isNotEmpty ? s : c;
+  }
+
+  /// 從含「錠劑、長橢圓形、白色」的整行擷取外觀。
+  String? _appearanceFromTabletLine(String line) {
+    final m = _twTabletAppearanceRegExp.firstMatch(line);
+    if (m != null) {
+      return _appearanceFromShapeColor(m.group(1) ?? '', m.group(2) ?? '');
+    }
+
+    if (!line.contains('錠') && !line.contains('膠囊')) return null;
+
+    String? shape;
+    String? color;
+    if (line.contains('長橢圓') || line.contains('长椭圆')) {
+      shape = '長橢圓形';
+    } else if (line.contains('橢圓')) {
+      shape = '橢圓形';
+    } else if (line.contains('圓形') || line.contains('圆形')) {
+      shape = '圓形';
+    } else if (line.contains('長形')) {
+      shape = '長形';
+    }
+
+    for (final key in ['白色', '粉紅', '紅色', '紅', '黃色', '黃', '藍色', '藍', '綠色', '綠', '橘', '橙']) {
+      if (line.contains(key)) {
+        color = key.endsWith('色') ? key : '$key色';
+        if (key == '紅' && line.contains('粉紅')) continue;
+        break;
+      }
+    }
+
+    return _appearanceFromShapeColor(shape ?? '', color ?? '');
+  }
+
+  /// 從 OCR 文字擷取藥丸外觀描述（台灣醫院藥袋優先）。
+  String? _extractPillAppearance(String rawText, List<String> medicationNames) {
+    // 1) 優先：含「錠劑、長橢圓形、白色」的中文描述行。
+    for (final rawLine in rawText.split('\n')) {
+      final line = rawLine.trim();
+      if (line.isEmpty) continue;
+      final fromTablet = _appearanceFromTabletLine(line);
+      if (fromTablet != null && _isUsableAppearanceText(fromTablet)) {
+        return fromTablet;
+      }
+    }
+
+    // 2) 全文搜尋台灣藥袋句式。
+    final tw = _twTabletAppearanceRegExp.firstMatch(rawText);
+    if (tw != null) {
+      final built = _appearanceFromShapeColor(tw.group(1) ?? '', tw.group(2) ?? '');
+      if (built != null && _isUsableAppearanceText(built)) return built;
+    }
+
+    // 3) 中文「外觀：」標籤（排除英文副作用那一行）。
+    for (final m in _pillAppearanceLabelRegExp.allMatches(rawText)) {
+      final value = m.group(1)?.trim();
+      if (value == null || value.isEmpty) continue;
+      if (!_isUsableAppearanceText(value)) continue;
+      return value.length > 80 ? '${value.substring(0, 80)}…' : value;
+    }
+
+    final slash = _pillSlashRegExp.firstMatch(rawText);
+    if (slash != null) {
+      final built = '${slash.group(1)}/${slash.group(2)}';
+      if (_isUsableAppearanceText(built)) return built;
+    }
+
+    final compact = _pillCompactRegExp.firstMatch(rawText);
+    if (compact != null) {
+      final built = compact.group(0)?.trim();
+      if (built != null && _isUsableAppearanceText(built)) return built;
+    }
+
+    final inferred = PrescriptionResult._inferPillHintFromNames(medicationNames);
+    if (inferred.isNotEmpty && _isUsableAppearanceText(inferred)) {
+      return inferred;
+    }
+    return null;
   }
 
   /// 從整段文字找出第一個含「醫院」或「診所」的行，回傳整行（已 trim）。

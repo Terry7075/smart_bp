@@ -85,8 +85,10 @@ final profileProvider =
 class ProfileNotifier extends AsyncNotifier<Profile?> {
   @override
   Future<Profile?> build() async {
-    // 當 Supabase auth 狀態（登入 / 登出）改變時，自動重抓 profile。
+    // 當 Supabase auth 狀態（登入 / 登出 / 切換帳號）改變時，立刻清掉舊 profile
+    // 並進 loading，避免 RoleGuard / 路由在重抓完成前仍用「上一個使用者」的 role。
     ref.listen(authStateChangesProvider, (previous, next) {
+      state = const AsyncLoading();
       ref.invalidateSelf();
     });
 
@@ -101,8 +103,9 @@ class ProfileNotifier extends AsyncNotifier<Profile?> {
 
   /// 將姓名 / 手機寫回 Supabase 並更新本地狀態。
   ///
-  /// 失敗時會 rethrow 讓 UI 端用 try/catch 顯示錯誤訊息；
-  /// 成功時 [state] 會是新的 [Profile]，畫面（如首頁）會自動重新渲染。
+  /// 儲存期間**不**把整個 provider 設成 AsyncLoading（否則 ProfilePage 的
+  /// `when(loading: …)` 會把表單換成轉圈，失敗時連編輯內容都看不到）。
+  /// 頁面端用 `_isSaving` overlay 即可；失敗時還原先前的 profile 並 rethrow。
   Future<void> updateProfile({
     required String name,
     String? phone,
@@ -118,18 +121,19 @@ class ProfileNotifier extends AsyncNotifier<Profile?> {
       throw ArgumentError('姓名不可為空');
     }
 
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
+    final previous = state.asData?.value;
+
+    try {
       await Supabase.instance.client.from('profiles').update({
         'name': trimmedName,
         'phone': trimmedPhone,
       }).eq('id', user.id);
-      return _fetchCurrent();
-    });
-
-    // 若寫入失敗（state 變成 AsyncError），rethrow 給上層處理。
-    if (state.hasError) {
-      throw state.error!;
+      state = AsyncData(await _fetchCurrent());
+    } catch (e, st) {
+      if (previous != null) {
+        state = AsyncData(previous);
+      }
+      Error.throwWithStackTrace(e, st);
     }
   }
 
@@ -137,14 +141,57 @@ class ProfileNotifier extends AsyncNotifier<Profile?> {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return null;
 
-    final data = await Supabase.instance.client
-        .from('profiles')
-        .select('id, name, phone, role')
-        .eq('id', user.id)
-        .maybeSingle();
+    var data = await _queryProfile(user.id);
+
+    // OAuth 首次登入：auth 的 _ensureProfile 是非同步 fire-and-forget，
+    // profileProvider 可能先查到 null 就讓角色決策頁永遠卡在 splash。
+    // 這裡主動補建 + 短暫重試，與 auth 端邏輯互補。
+    if (data == null) {
+      await _bootstrapProfileIfMissing(user);
+      for (var attempt = 0; attempt < 3 && data == null; attempt++) {
+        if (attempt > 0) {
+          await Future<void>.delayed(Duration(milliseconds: 200 * attempt));
+        }
+        data = await _queryProfile(user.id);
+      }
+    }
 
     if (data == null) return null;
     return Profile.fromMap(data);
+  }
+
+  Future<Map<String, dynamic>?> _queryProfile(String userId) async {
+    return Supabase.instance.client
+        .from('profiles')
+        .select('id, name, phone, role')
+        .eq('id', userId)
+        .maybeSingle();
+  }
+
+  /// OAuth 第一次登入時若 profiles 列尚不存在，補建一筆 elder 預設資料。
+  Future<void> _bootstrapProfileIfMissing(User user) async {
+    try {
+      final existing = await Supabase.instance.client
+          .from('profiles')
+          .select('id')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (existing != null) return;
+
+      final meta = user.userMetadata ?? const <String, dynamic>{};
+      final name = (meta['full_name'] as String?) ??
+          (meta['name'] as String?) ??
+          '社區長輩';
+
+      await Supabase.instance.client.from('profiles').insert({
+        'id': user.id,
+        'name': name,
+        if (user.phone != null && user.phone!.isNotEmpty) 'phone': user.phone,
+        'role': Profile.kRoleElder,
+      });
+    } catch (_) {
+      // 可能與 auth._ensureProfile 同時 insert（duplicate）— 忽略即可。
+    }
   }
 }
 

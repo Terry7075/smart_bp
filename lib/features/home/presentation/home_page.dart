@@ -3,14 +3,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:smart_bp/core/notification_service.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/health/presentation/health_page.dart';
-import 'package:smart_bp/features/prescription/prescription_provider.dart';
+import 'package:smart_bp/features/health_monitoring/health_monitoring_provider.dart';
+import 'package:smart_bp/features/health_monitoring/presentation/elder_monitoring_tab.dart';
+import 'package:smart_bp/features/home/presentation/notification_center_page.dart';
+import 'package:smart_bp/features/prescription/elder_prescription_sync.dart';
 import 'package:smart_bp/features/profile/profile_provider.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task.dart';
-import 'package:smart_bp/features/volunteer/volunteer_task_provider.dart';
 
 /// 首頁底部導覽目前選中的索引（預設 0 = 首頁）。
 final homeBottomNavIndexProvider = NotifierProvider<HomeBottomNavIndex, int>(
@@ -43,15 +44,11 @@ class _HomePageState extends ConsumerState<HomePage> {
     '柑仔店',
     '交通',
     '健康',
-    '學習',
+    '監測',
     '活動',
   ];
 
-  /// 上次 stream 觀察到的 status，用來偵測「pending/in_progress → active」轉換。
-  ///
-  /// 為什麼不用 didUpdateWidget？因為 stream 是 Riverpod async value，我們改用
-  /// `ref.listen` 在 [build] 內監聽，把前次值存在 state 即可。
-  VolunteerTaskStatus? _lastStatus;
+  String? _lastSnackTaskId;
 
   @override
   void initState() {
@@ -71,81 +68,33 @@ class _HomePageState extends ConsumerState<HomePage> {
     final colorScheme = Theme.of(context).colorScheme;
     final navIndex = ref.watch(homeBottomNavIndexProvider);
 
-    // 觀察「我自己最新一筆藥單任務」的 Realtime stream；當志工剛把
-    // status 推到 active 時，我們在這裡幫長輩自動排提醒 + 顯示 SnackBar。
-    ref.listen<AsyncValue<VolunteerTask?>>(
-      latestPrescriptionStreamProvider,
-      _onLatestPrescriptionChanged,
-    );
+    // 常駐：比對 volunteer_tasks ↔ prescriptions，補同步 + 排提醒。
+    ref.watch(elderPrescriptionSyncProvider);
+
+    // 常駐：監聽 notification_outbox，收到 health_alert 時顯示本機通知。
+    ref.watch(outboxDispatcherProvider);
+
+    ref.listen<VolunteerTask?>(elderVolunteerConfirmSnackProvider, (_, next) {
+      if (next == null) return;
+      if (_lastSnackTaskId == next.id) return;
+      _lastSnackTaskId = next.id;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Color(0xFF2E7D32),
+          duration: Duration(seconds: 6),
+          content: Text(
+            '📢 志工已完成確認，並幫您設好吃藥提醒囉！',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+        ),
+      );
+      ref.read(elderVolunteerConfirmSnackProvider.notifier).clear();
+    });
 
     return RoleGuard(
       requiredRole: RoleGuardTarget.elder,
       child: _buildScaffold(context, ref, colorScheme, navIndex),
-    );
-  }
-
-  /// `latestPrescriptionStreamProvider` 變化時的副作用處理。
-  ///
-  /// 關鍵：只有「上一個非 active → 這次 active」這條轉換才會觸發
-  /// `schedulePrescriptionReminders` + SnackBar，避免 App 開啟時因為一進來就拿到
-  /// `active` 而誤排或重複叮咚。
-  void _onLatestPrescriptionChanged(
-    AsyncValue<VolunteerTask?>? previous,
-    AsyncValue<VolunteerTask?> next,
-  ) {
-    final task = next.value;
-    if (task == null) return;
-
-    final wasActiveAlready = _lastStatus == VolunteerTaskStatus.active;
-    final justBecameActive =
-        task.status == VolunteerTaskStatus.active && !wasActiveAlready;
-
-    // 不論是否觸發副作用，先更新 _lastStatus 才不會反覆 fire。
-    final hadPrior = _lastStatus != null;
-    _lastStatus = task.status;
-
-    // 第一次拿到資料（_lastStatus 原本是 null）即使是 active 也不該觸發，
-    // 否則 App 冷啟時會把舊任務重排一次。
-    if (!hadPrior) return;
-    if (!justBecameActive) return;
-
-    // 真的是「剛剛被志工確認」這條轉換——排提醒 + SnackBar。
-    _scheduleAndNotify(task);
-  }
-
-  Future<void> _scheduleAndNotify(VolunteerTask task) async {
-    final messenger = ScaffoldMessenger.of(context);
-
-    try {
-      final pickup = task.pickupDate ?? DateTime.now();
-      await ref.read(prescriptionRepositoryProvider).upsertVolunteerPrescription(
-            id: task.id,
-            userId: task.elderId,
-            hospitalName: task.hospitalName,
-            pickupDate: pickup,
-            takeMedicineTimes: task.takeMedicineTimes,
-          );
-      await NotificationService.instance.schedulePrescriptionReminders(
-        prescriptionId: task.id,
-        takeMedicineTimes: task.takeMedicineTimes,
-        pickupDate: task.pickupDate,
-        hospitalName: task.hospitalName,
-      );
-      ref.invalidate(activePrescriptionsProvider);
-    } catch (e) {
-      print('[Home] auto schedule reminders error: $e');
-    }
-
-    if (!mounted) return;
-    messenger.showSnackBar(
-      const SnackBar(
-        backgroundColor: Color(0xFF2E7D32),
-        duration: Duration(seconds: 6),
-        content: Text(
-          '📢 志工已完成確認，並幫您設好吃藥提醒囉！',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-      ),
     );
   }
 
@@ -171,6 +120,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ),
         actions: [
+          const _NotificationBellButton(),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: PopupMenuButton<_AvatarMenu>(
@@ -223,22 +173,20 @@ class _HomePageState extends ConsumerState<HomePage> {
       body: SafeArea(
         child: navIndex == 3
             ? const HealthPage()
-            : SingleChildScrollView(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const _GreetingCard(),
-                    const SizedBox(height: 16),
-                    const _TaskStatusCard(),
-                    const SizedBox(height: 20),
-                    const _ActionGrid(),
-                    const SizedBox(height: 16),
-                    const _HealthScanBanner(),
-                  ],
-                ),
-              ),
+            : navIndex == 4
+                ? const ElderMonitoringTab()
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const _GreetingCard(),
+                        const SizedBox(height: 20),
+                        const _ActionGrid(),
+                      ],
+                    ),
+                  ),
       ),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
@@ -277,9 +225,9 @@ class _HomePageState extends ConsumerState<HomePage> {
             label: '健康',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.school_outlined),
-            activeIcon: Icon(Icons.school),
-            label: '學習',
+            icon: Icon(Icons.monitor_heart_outlined),
+            activeIcon: Icon(Icons.monitor_heart),
+            label: '監測',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.event_outlined),
@@ -293,6 +241,39 @@ class _HomePageState extends ConsumerState<HomePage> {
 }
 
 enum _AvatarMenu { profile, logout }
+
+/// AppBar 通知小鈴鐺：有待審核藥單時顯示紅點。
+class _NotificationBellButton extends ConsumerWidget {
+  const _NotificationBellButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(elderPrescriptionSyncProvider);
+    final badgeCount = ref.watch(elderNotificationBadgeCountProvider);
+
+    return IconButton(
+      onPressed: () => _openNotificationCenter(context),
+      tooltip: '系統通知',
+      icon: Badge(
+        isLabelVisible: badgeCount > 0,
+        label: Text(
+          badgeCount > 9 ? '9+' : '$badgeCount',
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFFC62828),
+        child: const Icon(Icons.notifications_outlined, size: 28),
+      ),
+    );
+  }
+
+  void _openNotificationCenter(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const NotificationCenterPage(),
+      ),
+    );
+  }
+}
 
 class _UserAvatar extends ConsumerWidget {
   const _UserAvatar();
@@ -428,213 +409,6 @@ class _GreetingCard extends ConsumerWidget {
   }
 }
 
-// ============================================================================
-//  任務狀態即時監聽卡片：依 Realtime stream 顯示「等志工 / 已確認」
-// ============================================================================
-
-/// 長輩首頁顯示「最新一張藥單目前進度」的卡片。
-///
-/// 設計原則：
-/// - 沒有任何任務時直接 `SizedBox.shrink()`，不打擾首頁版面。
-/// - `pending` / `inProgress` 都顯示成「⏳ 志工正在幫您看藥單中」的橘色等待卡。
-/// - `active` 顯示綠色成功卡 + 領藥日 + 服藥時段。
-/// - `done` / `cancelled` 視為「歷史單」也不顯示，避免長輩疑惑。
-///
-/// 實際 schedule 提醒 + SnackBar 由首頁 `ref.listen` 處理，這個卡片只負責顯示。
-class _TaskStatusCard extends ConsumerWidget {
-  const _TaskStatusCard();
-
-  static const _waitOrange = Color(0xFFE65100);
-  static const _waitOrangeBg = Color(0xFFFFF3E0);
-  static const _doneGreen = Color(0xFF2E7D32);
-  static const _doneGreenBg = Color(0xFFE8F5E9);
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final asyncTask = ref.watch(latestPrescriptionStreamProvider);
-
-    return asyncTask.when(
-      // Stream 第一次連線（loading）/ 連線錯誤都不擋首頁，靜默。
-      loading: () => const SizedBox.shrink(),
-      error: (_, _) => const SizedBox.shrink(),
-      data: (task) {
-        if (task == null) return const SizedBox.shrink();
-
-        switch (task.status) {
-          case VolunteerTaskStatus.pending:
-          case VolunteerTaskStatus.inProgress:
-            return _buildWaitingCard(task);
-          case VolunteerTaskStatus.active:
-            return _buildActiveCard(task);
-          case VolunteerTaskStatus.done:
-          case VolunteerTaskStatus.cancelled:
-            return const SizedBox.shrink();
-        }
-      },
-    );
-  }
-
-  Widget _buildWaitingCard(VolunteerTask task) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: _waitOrangeBg,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _waitOrange.withValues(alpha: 0.4), width: 2),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const SizedBox(
-                width: 28,
-                height: 28,
-                child: CircularProgressIndicator(
-                  strokeWidth: 4,
-                  color: _waitOrange,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  '⏳ 志工正在幫您看藥單中…',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: _waitOrange,
-                    height: 1.3,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            '請耐心等候，村辦公室確認完畢後\n會立刻通知您！',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFFBF360C),
-              height: 1.5,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActiveCard(VolunteerTask task) {
-    final pickupText = task.pickupDate != null
-        ? '${task.pickupDate!.year} 年 ${task.pickupDate!.month} 月 ${task.pickupDate!.day} 日'
-        : '（志工尚未填）';
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: _doneGreenBg,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _doneGreen.withValues(alpha: 0.5), width: 2),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.check_circle,
-                  size: 32, color: _doneGreen),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  '✅ 志工已幫您設定好鬧鐘！',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: _doneGreen,
-                    height: 1.3,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (task.hospitalName != null && task.hospitalName!.isNotEmpty) ...[
-            _ActiveRow(
-              icon: '🏥',
-              label: '看診醫院',
-              value: task.hospitalName!,
-            ),
-            const SizedBox(height: 8),
-          ],
-          _ActiveRow(
-            icon: '📅',
-            label: '下次領藥日',
-            value: pickupText,
-            valueColor: const Color(0xFFC62828),
-          ),
-          const SizedBox(height: 8),
-          _ActiveRow(
-            icon: '⏰',
-            label: '吃藥時段',
-            value: task.takeMedicineTimes.isEmpty
-                ? '（未設定）'
-                : task.takeMedicineTimes.join('、'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActiveRow extends StatelessWidget {
-  const _ActiveRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.valueColor,
-  });
-
-  final String icon;
-  final String label;
-  final String value;
-  final Color? valueColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(icon, style: const TextStyle(fontSize: 22)),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 96,
-          child: Text(
-            label,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Colors.black54,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: valueColor ?? Colors.black87,
-              height: 1.4,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _ChatShortcutCard extends StatelessWidget {
   const _ChatShortcutCard({
     required this.color,
@@ -689,7 +463,7 @@ class _ActionGrid extends StatelessWidget {
   const _ActionGrid();
 
   static const _learningBlue = Color(0xFF1565C0);
-  static const _transportGreen = Color(0xFF2E7D32);
+  static const _hakkaTeal = Color(0xFF00695C);
 
   @override
   Widget build(BuildContext context) {
@@ -699,22 +473,22 @@ class _ActionGrid extends StatelessWidget {
         Expanded(
           child: _LargeMenuCard(
             title: '社區學習',
-            subtitle: '課程、講座與報名',
+            subtitle: '防詐宣導與健康教室',
             icon: Icons.menu_book_rounded,
             iconBackground: _learningBlue.withValues(alpha: 0.12),
             iconColor: _learningBlue,
-            onTap: () => print('點擊了 社區學習'),
+            onTap: () => context.push('/community-learning'),
           ),
         ),
         const SizedBox(width: 16),
         Expanded(
           child: _LargeMenuCard(
-            title: '交通查詢',
-            subtitle: '公車與接駁資訊',
-            icon: Icons.directions_car_filled_rounded,
-            iconBackground: _transportGreen.withValues(alpha: 0.12),
-            iconColor: _transportGreen,
-            onTap: () => print('點擊了 交通查詢'),
+            title: '🗣️ 客語資訊',
+            subtitle: '生活客語、歌謠與在地故事',
+            icon: Icons.record_voice_over_rounded,
+            iconBackground: _hakkaTeal.withValues(alpha: 0.12),
+            iconColor: _hakkaTeal,
+            onTap: () => context.push('/hakka-culture'),
           ),
         ),
       ],
@@ -784,79 +558,6 @@ class _LargeMenuCard extends StatelessWidget {
                   height: 1.3,
                 ),
               ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 首頁「健康掃描」快捷入口：導向 OCR 掃描頁。
-class _HealthScanBanner extends StatelessWidget {
-  const _HealthScanBanner();
-
-  static const _healthRed = Color(0xFFC62828);
-
-  @override
-  Widget build(BuildContext context) {
-    final onPrimary = Theme.of(context).colorScheme.onPrimary;
-
-    return Material(
-      color: _healthRed,
-      elevation: 3,
-      shadowColor: Colors.black38,
-      borderRadius: BorderRadius.circular(20),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => context.push('/health-scan'),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
-          child: Row(
-            children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: onPrimary.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  Icons.document_scanner_rounded,
-                  size: 36,
-                  color: onPrimary,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '健康處方籤掃描',
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        color: onPrimary,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '拍照或從相簿辨識血壓、血糖與藥袋',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: onPrimary.withValues(alpha: 0.92),
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Icon(Icons.chevron_right, size: 36, color: onPrimary),
             ],
           ),
         ),
