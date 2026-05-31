@@ -13,6 +13,7 @@ import 'package:smart_bp/features/shop/presentation/shop_products_provider.dart'
 import 'package:smart_bp/features/shop/presentation/shop_frequent_products_provider.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_realtime_provider.dart';
 import 'package:smart_bp/features/shop/data/px_mart_links.dart';
+import 'package:smart_bp/features/shop/presentation/widgets/shop_supply_wizard.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/shop_manual_voice_section.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/shop_voice_demand_bar.dart';
 import 'package:smart_bp/shared/widgets/mindu_loading_overlay.dart';
@@ -332,6 +333,7 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
             child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
+              const ShopSupplyWizard(),
               Card(
                 color: widget.colorScheme.primaryContainer.withValues(alpha: 0.35),
                 child: Padding(

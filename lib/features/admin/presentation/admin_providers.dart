@@ -12,7 +12,7 @@ final class DayOrderCount {
 
 /// 近 7 天每日訂單數 + Top5 熱門品項（用於圖表）。
 final adminChartDataProvider = FutureProvider<
-    ({List<DayOrderCount> ordersByDay, List<({String name, int qty})> top5})>(
+    ({List<DayOrderCount> ordersByDay, List<({String name, int qty})> top5, List<({String name, int qty})> topCategories, List<({String name, int qty})> topBrands})>(
   (ref) async {
     final orders = await ref.read(adminOrdersProvider.future);
     final now = DateTime.now();
@@ -25,6 +25,8 @@ final adminChartDataProvider = FutureProvider<
     }
 
     final productQty = <String, int>{};
+    final categoryQty = <String, int>{};
+    final brandQty = <String, int>{};
     for (final o in orders) {
       final key =
           '${o.createdAt.year}-${o.createdAt.month.toString().padLeft(2, '0')}-${o.createdAt.day.toString().padLeft(2, '0')}';
@@ -34,6 +36,13 @@ final adminChartDataProvider = FutureProvider<
       for (final it in o.items) {
         productQty[it.productName] =
             (productQty[it.productName] ?? 0) + it.quantity;
+        final cat = it.supplyCategoryKey ?? it.category;
+        if (cat != null && cat.trim().isNotEmpty) {
+          categoryQty[cat] = (categoryQty[cat] ?? 0) + it.quantity;
+        }
+        if (it.brand != null && it.brand!.trim().isNotEmpty) {
+          brandQty[it.brand!] = (brandQty[it.brand!] ?? 0) + it.quantity;
+        }
       }
     }
 
@@ -48,7 +57,16 @@ final adminChartDataProvider = FutureProvider<
         .map((e) => (name: e.key, qty: e.value))
         .toList();
 
-    return (ordersByDay: ordersByDay, top5: top5);
+    final topCategories = categoryQty.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final topBrands = brandQty.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return (
+      ordersByDay: ordersByDay,
+      top5: top5,
+      topCategories: topCategories.take(5).map((e) => (name: e.key, qty: e.value)).toList(),
+      topBrands: topBrands.take(5).map((e) => (name: e.key, qty: e.value)).toList(),
+    );
   },
 );
 

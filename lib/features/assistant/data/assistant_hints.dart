@@ -20,6 +20,7 @@ abstract final class AssistantHints {
   /// 點擊後直接送出當作使用者問題。
   static const sampleQuestions = [
     '最近好嗎？',
+    '我家衛生紙沒了',
     '全部功能',
     '我的藥單怎麼了？',
     '代購到哪了？',
@@ -49,7 +50,7 @@ abstract final class AssistantHints {
     _Capability(
       icon: '🛒',
       title: '查代購',
-      subtitle: '代購到哪一步，幫您看',
+      subtitle: '說「衛生紙沒了」會問要不要買',
     ),
   ];
 }

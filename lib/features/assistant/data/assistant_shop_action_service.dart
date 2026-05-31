@@ -1,3 +1,4 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_nav_action.dart';
@@ -6,6 +7,9 @@ import 'package:smart_bp/features/assistant/domain/assistant_shop_intent.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_snapshot.dart';
 import 'package:smart_bp/features/shared/offline_queue/offline_queue.dart';
 import 'package:smart_bp/features/shop/data/demand_records_repository.dart';
+import 'package:smart_bp/features/shop/data/elder_supply_templates.dart';
+import 'package:smart_bp/features/shop/data/supply_dialogue_service.dart';
+import 'package:smart_bp/features/shop/domain/supply_line_snapshot.dart';
 import 'package:smart_bp/features/shop/data/price_references_repository.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
 
@@ -23,8 +27,17 @@ class AssistantShopActionService {
   static const _navShop = AssistantNavAction(label: '前往柑仔店', route: '/shop');
   static const _navShopOrders =
       AssistantNavAction(label: '查看需求紀錄', route: '/shop/orders');
-  static const _navPrices =
-      AssistantNavAction(label: '全聯價格參考', route: '/shop/prices');
+  static AssistantNavAction _navPrices([String? searchQuery]) {
+    final q = searchQuery?.trim();
+    if (q == null || q.isEmpty) {
+      return const AssistantNavAction(label: '全聯價格參考', route: '/shop/prices');
+    }
+    return AssistantNavAction(
+      label: '全聯價格參考',
+      route: '/shop/prices',
+      queryParameters: {'q': q},
+    );
+  }
 
   Future<AssistantReply> handle({
     required ShopIntentClassification classification,
@@ -33,60 +46,125 @@ class AssistantShopActionService {
   }) async {
     final intent = classification.intent;
     final slots = classification.slots;
-    final layerNote =
-        '（意圖：${classification.intentLabel}，${classification.layer}，'
-        '${classification.elapsedMs}ms）';
+    if (kDebugMode) {
+      debugPrint(
+        '[AssistantShop] ${classification.intentLabel} '
+        '${classification.layer} ${classification.elapsedMs}ms',
+      );
+    }
 
     switch (intent) {
       case AssistantShopIntent.recordDemand:
-        return _recordDemand(userId, slots, layerNote);
+        return _recordDemand(userId, slots);
+      case AssistantShopIntent.shortageSuggest:
+        return _shortageSuggest(slots);
       case AssistantShopIntent.queryPrice:
-        return _queryPrice(slots, layerNote);
+        return _queryPrice(slots);
       case AssistantShopIntent.viewRecorded:
-        return _viewRecorded(userId, snapshot, layerNote);
+        return _viewRecorded(userId, snapshot);
       case AssistantShopIntent.cancelDemand:
-        return _cancelDemand(userId, slots, layerNote);
+        return _cancelDemand(userId, slots);
       case AssistantShopIntent.queryOrderStatus:
-        return _queryOrderStatus(snapshot, layerNote);
+        return _queryOrderStatus(snapshot);
       case AssistantShopIntent.casual:
         return AssistantReply(
-          text: '您好！想記需求可以說「我要買米和醬油」，查價說「雞蛋多少錢」。$layerNote',
-          actions: const [_navShop, _navPrices],
+          text: '您好！想記需求可以說「我要買米和醬油」，'
+              '或跟我說「我家衛生紙沒了」，我會問您要不要代購。',
+          actions: [_navShop, _navPrices()],
         );
     }
+  }
+
+  AssistantReply _shortageSuggest(ShopIntentSlots? slots) {
+    final name = slots?.singleProduct?.trim() ?? '';
+    if (name.isEmpty) {
+      return const AssistantReply(
+        text: '哪一樣東西用完了呢？例如說「我家衛生紙沒了」。',
+        actions: [_navShop],
+      );
+    }
+    return AssistantReply(
+      text: '聽起來家裡的「$name」用完了。\n需要幫您記下來，請志工代購嗎？',
+      actions: [
+        AssistantNavAction(
+          label: '好，幫我買',
+          sendMessageOnTap: '好，幫我買$name',
+        ),
+        AssistantNavAction(
+          label: '先查價格',
+          sendMessageOnTap: '$name多少錢',
+        ),
+        _navPrices(name),
+        _navShop,
+      ],
+    );
   }
 
   Future<AssistantReply> _recordDemand(
     String userId,
     ShopIntentSlots? slots,
-    String layerNote,
   ) async {
     final lines = slots?.lines ?? const [];
+    const supplyDialogue = SupplyDialogueService();
+    if (lines.length == 1) {
+      final pending = supplyDialogue.pendingFromDemandLine(
+        lines.first.productName,
+        lines.first.quantity,
+      );
+      if (pending != null) {
+        return supplyDialogue.brandAskReplyFor(pending);
+      }
+    }
     if (lines.isEmpty) {
-      return AssistantReply(
-        text: '想買什麼可以跟我說，例如「我要買兩瓶醬油」。$layerNote',
-        actions: const [_navShop],
+      return const AssistantReply(
+        text: '想買什麼可以跟我說，例如「我要買兩瓶醬油」。',
+        actions: [_navShop],
       );
     }
     try {
-      final record = await _demandRepo.addLines(
-        userId: userId,
-        lines: [
-          for (final l in lines)
-            (
-              productName: l.productName,
+      final snapshots = <SupplyLineSnapshot>[];
+      final legacy = <({String productName, int quantity, String? productId, double? unitPrice})>[];
+      for (final l in lines) {
+        final cat = ElderSupplyTemplates.findCategoryByKeyword(l.productName);
+        final opt = cat != null
+            ? ElderSupplyTemplates.findOption(cat, l.productName)
+            : null;
+        if (cat != null && opt != null && !opt.isOther) {
+          snapshots.add(
+            ElderSupplyTemplates.buildSnapshot(
+              category: cat,
+              option: opt,
               quantity: l.quantity,
-              productId: null as String?,
-              unitPrice: null as double?,
             ),
-        ],
-      );
+          );
+        } else {
+          legacy.add((
+            productName: l.productName,
+            quantity: l.quantity,
+            productId: null as String?,
+            unitPrice: null as double?,
+          ));
+        }
+      }
+      DemandRecord record;
+      if (snapshots.isNotEmpty) {
+        record = await _demandRepo.addSnapshotLines(
+          userId: userId,
+          lines: snapshots,
+        );
+      } else {
+        record = await _demandRepo.getOrCreateDraft(userId: userId) ??
+            (throw const AuthException('無法建立需求草稿'));
+      }
+      if (legacy.isNotEmpty) {
+        record = await _demandRepo.addLines(userId: userId, lines: legacy);
+      }
       final summary = record.activeItems
           .map((i) => '${i.productName}×${i.quantity}')
           .join('、');
       return AssistantReply(
         text: '好，已幫您記在需求草稿裡：$summary。\n'
-            '要正式送出請到柑仔店確認，或跟我說「我剛剛說要買什麼」查看。$layerNote',
+            '要正式送出請到柑仔店確認，或跟我說「我剛剛說要買什麼」查看。',
         actions: const [_navShop, _navShopOrders],
       );
     } catch (e) {
@@ -108,21 +186,20 @@ class AssistantShopActionService {
 
   Future<AssistantReply> _queryPrice(
     ShopIntentSlots? slots,
-    String layerNote,
   ) async {
     final name = slots?.singleProduct?.trim() ?? '';
     if (name.isEmpty) {
       return AssistantReply(
-        text: '想查哪一樣的價格呢？例如「雞蛋多少錢」。$layerNote',
-        actions: const [_navPrices],
+        text: '想查哪一樣的價格呢？例如「雞蛋多少錢」。',
+        actions: [_navPrices()],
       );
     }
     final ref = await _priceRepo.findByName(name);
     if (ref == null) {
       return AssistantReply(
         text: '目前參考表裡還找不到「$name」的價格，'
-            '您可以到全聯價格參考頁搜尋，或到柑仔店看目錄。$layerNote',
-        actions: const [_navPrices, _navShop],
+            '您可以到全聯價格參考頁搜尋，或到柑仔店看目錄。',
+        actions: [_navPrices(name), _navShop],
       );
     }
     final price = ref.unitPrice != null
@@ -131,15 +208,14 @@ class AssistantShopActionService {
     return AssistantReply(
       text: '「${ref.productName}」參考價 $price'
           '${ref.unitLabel != null ? '／${ref.unitLabel}' : ''}。\n'
-          '實際以全聯門市為準喔。$layerNote',
-      actions: const [_navPrices, _navShop],
+          '實際以全聯門市為準喔。',
+      actions: [_navPrices(ref.productName), _navShop],
     );
   }
 
   Future<AssistantReply> _viewRecorded(
     String userId,
     AssistantSnapshot snapshot,
-    String layerNote,
   ) async {
     final buf = StringBuffer('您目前的記錄：\n');
     try {
@@ -164,7 +240,6 @@ class AssistantShopActionService {
       }
     }
 
-    buf.write(layerNote);
     return AssistantReply(
       text: buf.toString(),
       actions: const [_navShopOrders, _navShop],
@@ -174,13 +249,12 @@ class AssistantShopActionService {
   Future<AssistantReply> _cancelDemand(
     String userId,
     ShopIntentSlots? slots,
-    String layerNote,
   ) async {
     final name = slots?.singleProduct?.trim() ?? '';
     if (name.isEmpty) {
-      return AssistantReply(
-        text: '要取消哪一項呢？例如「那個牛奶不要了」。$layerNote',
-        actions: const [_navShopOrders],
+      return const AssistantReply(
+        text: '要取消哪一項呢？例如「那個牛奶不要了」。',
+        actions: [_navShopOrders],
       );
     }
     try {
@@ -191,18 +265,18 @@ class AssistantShopActionService {
       final left = updated?.activeItems ?? const [];
       if (left.isEmpty) {
         return AssistantReply(
-          text: '已將「$name」從草稿移除（或找不到該品項）。$layerNote',
+          text: '已將「$name」從草稿移除（或找不到該品項）。',
           actions: const [_navShopOrders],
         );
       }
       return AssistantReply(
         text: '已處理取消「$name」。目前草稿還有：'
-            '${left.map((i) => '${i.productName}×${i.quantity}').join('、')}。$layerNote',
+            '${left.map((i) => '${i.productName}×${i.quantity}').join('、')}。',
         actions: const [_navShopOrders, _navShop],
       );
     } catch (e) {
       return AssistantReply(
-        text: '取消時發生問題：$e$layerNote',
+        text: '取消時發生問題：$e',
         actions: const [_navShopOrders],
       );
     }
@@ -211,14 +285,13 @@ class AssistantShopActionService {
   /// 查詢最近 1～3 筆訂單狀態，用長者聽得懂的語句回覆（搭配 TTS 播報）。
   Future<AssistantReply> _queryOrderStatus(
     AssistantSnapshot snapshot,
-    String layerNote,
   ) async {
     final orders = snapshot.recentOrders.take(3).toList();
     if (orders.isEmpty) {
-      return AssistantReply(
+      return const AssistantReply(
         text: '目前查不到您有送出的需求單。\n'
-            '若要下單可以說「我要買衛生紙」。$layerNote',
-        actions: const [_navShop],
+            '若要下單可以說「我要買衛生紙」，或「我家衛生紙沒了」。',
+        actions: [_navShop],
       );
     }
     final buf = StringBuffer('您最近的需求單：\n');
@@ -227,7 +300,6 @@ class AssistantShopActionService {
       final items = o.items.map((i) => i.productName).join('、');
       buf.writeln('• $items — $label');
     }
-    buf.write(layerNote);
     return AssistantReply(
       text: buf.toString(),
       actions: const [_navShopOrders],

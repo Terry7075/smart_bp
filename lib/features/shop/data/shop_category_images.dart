@@ -12,6 +12,8 @@ class ShopCategoryImages {
   ShopCategoryImages._();
 
   static const Map<String, String> _urls = {
+    '衛生紙':
+        'https://cdn-icons-png.flaticon.com/128/2910/2910913.png',
     '清潔用品':
         'https://cdn-icons-png.flaticon.com/128/2182/2182968.png',
     '米糧':

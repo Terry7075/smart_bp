@@ -11,6 +11,7 @@ import 'package:smart_bp/features/assistant/presentation/assistant_tts_provider.
 import 'package:smart_bp/features/assistant/presentation/assistant_voice_provider.dart';
 import 'package:smart_bp/features/assistant/presentation/widgets/assistant_voice_live_panel.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
+import 'package:smart_bp/features/shop/presentation/widgets/brand_choice_list.dart';
 import 'package:smart_bp/shared/widgets/mindu_big_button.dart';
 
 /// 明德 e 達人 — 依 Supabase 資料回答的小幫手（長輩友善大字）。
@@ -647,6 +648,34 @@ class _MessageBubble extends ConsumerWidget {
                     color: fg,
                   ),
                 ),
+                if (!isUser && message.categoryImageUrl != null) ...[
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.network(
+                      message.categoryImageUrl!,
+                      height: 56,
+                      width: 56,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
+                  ),
+                ],
+                if (!isUser && message.brandChoices.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  BrandChoiceList(
+                    choices: message.brandChoices,
+                    enabled: actionsEnabled,
+                    onTapChoice: actionsEnabled
+                        ? (c) {
+                            final msg = c.sendMessageOnTap ?? '${c.index}';
+                            ref
+                                .read(assistantChatProvider.notifier)
+                                .sendUserMessage(msg);
+                          }
+                        : null,
+                  ),
+                ],
                 if (message.intentLabel != null &&
                     message.intentLabel!.trim().isNotEmpty) ...[
                   const SizedBox(height: 8),
@@ -707,8 +736,15 @@ class _MessageBubble extends ConsumerWidget {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        onPressed: () {
-                          assistantNavigate(context, ref, action);
+                        onPressed: () async {
+                          await assistantPerformAction(
+                            context,
+                            ref,
+                            action,
+                            onSendMessage: (msg) => ref
+                                .read(assistantChatProvider.notifier)
+                                .sendUserMessage(msg),
+                          );
                           onNavigate?.call();
                         },
                         child: Text(action.label),

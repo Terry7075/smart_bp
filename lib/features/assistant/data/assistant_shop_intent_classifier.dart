@@ -1,3 +1,5 @@
+import 'package:smart_bp/features/shop/data/elder_supply_templates.dart';
+import 'package:smart_bp/features/shop/data/shop_quantity_parser.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_shop_intent.dart';
 
 /// 三層意圖分類：關鍵字 → 正則 → 同義詞（報告 5.2.2）。
@@ -90,6 +92,8 @@ abstract final class AssistantShopIntentClassifier {
     if (_has(n, ['買了什麼', '記錄什麼', '說要買什麼', '剛剛買', '我的需求', '記了什麼'])) {
       return (AssistantShopIntent.viewRecorded, null);
     }
+    final shortage = _tryShortageSuggest(n, raw);
+    if (shortage != null) return shortage;
     if (_has(n, ['買', '購買', '採買', '要買', '想買', '幫我買', '記下', '加入'])) {
       final lines = _parseBuyLines(raw);
       if (lines.isNotEmpty) {
@@ -106,6 +110,23 @@ abstract final class AssistantShopIntentClassifier {
     String n,
     String raw,
   ) {
+    final parsed = ShopQuantityParser.parseCategoryRequest(raw);
+    if (parsed != null) {
+      final cat = ElderSupplyTemplates.findCategoryByKeyword(parsed.categoryKeyword);
+      if (cat != null) {
+        return (
+          AssistantShopIntent.recordDemand,
+          ShopIntentSlots(
+            lines: [
+              DemandLineSlot(
+                productName: parsed.categoryKeyword,
+                quantity: parsed.quantity,
+              ),
+            ],
+          ),
+        );
+      }
+    }
     final buyQty = RegExp(r'我要買(\d+)?([瓶包盒袋斤個件罐盒])?(.+)');
     final m1 = buyQty.firstMatch(n);
     if (m1 != null) {
@@ -152,6 +173,9 @@ abstract final class AssistantShopIntentClassifier {
     if (orderStatusQ.hasMatch(n) || volunteerQ.hasMatch(n)) {
       return (AssistantShopIntent.queryOrderStatus, null);
     }
+
+    final shortage = _tryShortageSuggest(n, raw);
+    if (shortage != null) return shortage;
 
     return null;
   }
@@ -232,6 +256,81 @@ abstract final class AssistantShopIntentClassifier {
       return name.isEmpty ? null : name;
     }
     return raw.replaceAll(RegExp(r'多少錢|價格|價錢|查'), '').trim();
+  }
+
+  static const _shortageSignals = [
+    '沒了',
+    '沒有了',
+    '用完了',
+    '用完',
+    '快沒了',
+    '快用完',
+    '不夠了',
+    '缺了',
+    '沒有了',
+  ];
+
+  static const _shortageExclude = [
+    '沒事',
+    '沒關係',
+    '沒問題',
+    '沒辦法',
+    '沒想到',
+    '沒有錢',
+    '沒有時間',
+  ];
+
+  static (AssistantShopIntent, ShopIntentSlots?)? _tryShortageSuggest(
+    String n,
+    String raw,
+  ) {
+    if (_has(n, _shortageExclude)) return null;
+    final hasSignal = _has(n, _shortageSignals) ||
+        RegExp(r'沒有.+?了').hasMatch(n);
+    if (!hasSignal) return null;
+    if (_has(n, ['買', '購買', '要買', '想買', '幫我買', '採買'])) return null;
+
+    final product = _extractProductForShortage(raw);
+    if (product == null || product.isEmpty) return null;
+
+    return (
+      AssistantShopIntent.shortageSuggest,
+      ShopIntentSlots(singleProduct: product),
+    );
+  }
+
+  static String? _extractProductForShortage(String raw) {
+    final n = _norm(raw);
+    final patterns = <RegExp>[
+      RegExp(r'我家(.+?)沒了'),
+      RegExp(r'家裡(.+?)沒了'),
+      RegExp(r'沒有(.+?)了'),
+      RegExp(r'(.+?)沒有了'),
+      RegExp(r'(.+?)快沒了'),
+      RegExp(r'(.+?)用完了'),
+      RegExp(r'(.+?)快用完'),
+      RegExp(r'(.+?)不夠了'),
+      RegExp(r'(.+?)缺了'),
+      RegExp(r'(.+?)沒了'),
+    ];
+    for (final re in patterns) {
+      final m = re.firstMatch(n);
+      if (m == null) continue;
+      final name = _cleanShortageProduct(m.group(1) ?? '');
+      if (name.isNotEmpty && name.length <= 24) return name;
+    }
+    return null;
+  }
+
+  static String _cleanShortageProduct(String name) {
+    var t = name.trim();
+    for (final prefix in ['我家', '家裡', '的', '一些', '一點', '還有']) {
+      if (t.startsWith(prefix)) {
+        t = t.substring(prefix.length);
+      }
+    }
+    t = t.replaceAll(RegExp(r'(了|啊|呢|喔|哦|啦)$'), '');
+    return t.trim();
   }
 
   static String? _extractProductForCancel(String raw) {

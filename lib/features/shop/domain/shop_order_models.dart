@@ -98,6 +98,11 @@ final class ShopOrderItemRow {
     this.unitPrice,
     this.category,
     this.unitLabel,
+    this.brand,
+    this.spec,
+    this.supplyCategoryKey,
+    this.templateOptionId,
+    this.referenceNote,
   });
 
   final String productId;
@@ -110,6 +115,11 @@ final class ShopOrderItemRow {
 
   /// 下單當下計價單位快照（包/瓶/罐…），來自 order_items.unit_label。
   final String? unitLabel;
+  final String? brand;
+  final String? spec;
+  final String? supplyCategoryKey;
+  final String? templateOptionId;
+  final String? referenceNote;
 }
 
 /// 長輩歷史訂單加總後的常購提示（非 ML 推薦）。

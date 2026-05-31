@@ -121,7 +121,10 @@ GoRouter get appRouter =>
         ),
         GoRoute(
           path: '/shop/prices',
-          builder: (context, state) => const ShopPricePage(),
+          builder: (context, state) {
+            final q = state.uri.queryParameters['q'];
+            return ShopPricePage(initialQuery: q);
+          },
         ),
         GoRoute(
           path: '/shop/orders',

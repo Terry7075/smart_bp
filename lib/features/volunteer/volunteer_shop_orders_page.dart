@@ -13,6 +13,7 @@ import 'package:smart_bp/features/shop/presentation/volunteer_demands_provider.d
 import 'package:smart_bp/shared/debug/realtime_latency_banner.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:smart_bp/features/shop/data/px_mart_links.dart';
+import 'package:smart_bp/features/shop/presentation/widgets/shopping_line_tile.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 
@@ -753,7 +754,11 @@ class _OrderItemTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  item.productName,
+                  [
+                    if (item.brand != null && item.brand!.trim().isNotEmpty) item.brand!.trim(),
+                    item.productName,
+                    if (item.spec != null && item.spec!.trim().isNotEmpty) item.spec!.trim(),
+                  ].join(' · '),
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
@@ -871,10 +876,6 @@ class _DraftCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final itemsSummary = draft.activeItems
-        .map((i) => '${i.productName} ×${i.quantity}')
-        .join('、');
-
     return Card(
       margin: const EdgeInsets.fromLTRB(0, 0, 0, 8),
       elevation: 1,
@@ -884,10 +885,15 @@ class _DraftCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              itemsSummary.isNotEmpty ? itemsSummary : '（無品項）',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
+            if (draft.activeItems.isEmpty)
+              const Text(
+                '（無品項）',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              )
+            else
+              ...draft.activeItems.map(
+                (i) => ShoppingLineTile.fromDemandItem(item: i),
+              ),
             const SizedBox(height: 4),
             Text(
               '草稿 · ${VolunteerShopOrdersPage._formatTime(draft.updatedAt)}',

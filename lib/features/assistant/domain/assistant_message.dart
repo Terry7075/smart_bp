@@ -1,3 +1,4 @@
+import 'package:smart_bp/features/assistant/domain/assistant_brand_choice.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_nav_action.dart';
 
 /// 小幫手對話中的一則訊息。
@@ -8,6 +9,8 @@ class AssistantMessage {
     required this.at,
     this.actions = const [],
     this.intentLabel,
+    this.brandChoices = const [],
+    this.categoryImageUrl,
   });
 
   final AssistantMessageRole role;
@@ -19,6 +22,8 @@ class AssistantMessage {
 
   /// 第五章：意圖類別標籤（記錄需求／查價／查看／取消／一般對話等）。
   final String? intentLabel;
+  final List<AssistantBrandChoice> brandChoices;
+  final String? categoryImageUrl;
 
   bool get isUser => role == AssistantMessageRole.user;
   bool get isAssistant => role == AssistantMessageRole.assistant;
@@ -29,6 +34,8 @@ class AssistantMessage {
         'at': at.toIso8601String(),
         'actions': actions.map((a) => a.toJson()).toList(),
         if (intentLabel != null) 'intent_label': intentLabel,
+        'brand_choices': brandChoices.map((c) => c.toJson()).toList(),
+        if (categoryImageUrl != null) 'category_image_url': categoryImageUrl,
       };
 
   factory AssistantMessage.fromJson(Map<String, dynamic> json) {
@@ -48,12 +55,25 @@ class AssistantMessage {
         }
       }
     }
+    final rawChoices = json['brand_choices'];
+    final brandChoices = <AssistantBrandChoice>[];
+    if (rawChoices is List) {
+      for (final e in rawChoices) {
+        if (e is Map) {
+          brandChoices.add(
+            AssistantBrandChoice.fromJson(Map<String, dynamic>.from(e)),
+          );
+        }
+      }
+    }
     return AssistantMessage(
       role: role,
       text: json['text']?.toString() ?? '',
       at: DateTime.tryParse(json['at']?.toString() ?? '') ?? DateTime.now(),
       actions: actions,
       intentLabel: json['intent_label']?.toString(),
+      brandChoices: brandChoices,
+      categoryImageUrl: json['category_image_url']?.toString(),
     );
   }
 }

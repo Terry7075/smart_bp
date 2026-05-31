@@ -3,6 +3,9 @@ enum AssistantShopIntent {
   /// 記錄需求（「我要買米和醬油」）
   recordDemand,
 
+  /// 缺貨／用完了，建議代購（「我家衛生紙沒了」）
+  shortageSuggest,
+
   /// 查詢價格（「雞蛋多少錢」）
   queryPrice,
 
@@ -54,6 +57,7 @@ final class ShopIntentClassification {
 
   String get intentLabel => switch (intent) {
         AssistantShopIntent.recordDemand => '記錄需求',
+        AssistantShopIntent.shortageSuggest => '缺貨建議',
         AssistantShopIntent.queryPrice => '查詢價格',
         AssistantShopIntent.viewRecorded => '查看已記錄',
         AssistantShopIntent.cancelDemand => '取消需求',

@@ -1,4 +1,6 @@
+import 'package:smart_bp/features/shop/domain/supply_line_snapshot.dart';
 import 'package:smart_bp/features/shop/data/shop_orders_repository.dart';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 final class DemandRecordItem {
@@ -9,6 +11,13 @@ final class DemandRecordItem {
     this.productId,
     this.unitPrice,
     this.cancelled = false,
+    this.brand,
+    this.spec,
+    this.unitLabel,
+    this.category,
+    this.supplyCategoryKey,
+    this.templateOptionId,
+    this.referenceNote,
   });
 
   final String id;
@@ -17,6 +26,13 @@ final class DemandRecordItem {
   final int quantity;
   final double? unitPrice;
   final bool cancelled;
+  final String? brand;
+  final String? spec;
+  final String? unitLabel;
+  final String? category;
+  final String? supplyCategoryKey;
+  final String? templateOptionId;
+  final String? referenceNote;
 }
 
 final class DemandRecord {
@@ -106,6 +122,29 @@ final class DemandRecordsRepository {
     return (await _loadRecordById(draft.id))!;
   }
 
+  Future<DemandRecord> addSnapshotLines({
+    required String userId,
+    required List<SupplyLineSnapshot> lines,
+  }) async {
+    final draft = await getOrCreateDraft(userId: userId);
+    if (draft == null) throw const AuthException('無法建立需求草稿');
+
+    for (final line in lines) {
+      await _client.from('demand_record_items').insert({
+        ...line.toInsertMap(),
+        'demand_record_id': draft.id,
+      });
+    }
+
+    await _client
+        .from('demand_records')
+        .update({'updated_at': DateTime.now().toUtc().toIso8601String()})
+        .eq('id', draft.id);
+
+    return (await _loadRecordById(draft.id))!;
+  }
+
+
   Future<DemandRecord?> cancelProduct({
     required String userId,
     required String productName,
@@ -147,11 +186,18 @@ final class DemandRecordsRepository {
       locationPointId: draft.locationPointId,
       lines: [
         for (final i in active)
-          (
+          SupplyLineSnapshot(
             productId: i.productId ?? '',
             productName: i.productName,
             quantity: i.quantity,
             unitPrice: i.unitPrice,
+            brand: i.brand,
+            spec: i.spec,
+            unitLabel: i.unitLabel,
+            category: i.category,
+            supplyCategoryKey: i.supplyCategoryKey,
+            templateOptionId: i.templateOptionId,
+            referenceNote: i.referenceNote,
           ),
       ],
     );
@@ -185,7 +231,7 @@ final class DemandRecordsRepository {
         .select(
           'id, user_id, status, location_point_id, order_id, updated_at, '
           'location_points(name), '
-          'demand_record_items(id, product_id, product_name, quantity, unit_price, cancelled)',
+          'demand_record_items(id, product_id, product_name, quantity, unit_price, cancelled, brand, spec, unit_label, category, supply_category_key, template_option_id, reference_note)',
         )
         .inFilter('status', ['draft', 'submitted'])
         .order('updated_at', ascending: false)
@@ -207,7 +253,7 @@ final class DemandRecordsRepository {
         .select(
           'id, user_id, status, location_point_id, order_id, updated_at, '
           'location_points(name), '
-          'demand_record_items(id, product_id, product_name, quantity, unit_price, cancelled)',
+          'demand_record_items(id, product_id, product_name, quantity, unit_price, cancelled, brand, spec, unit_label, category, supply_category_key, template_option_id, reference_note)',
         )
         .eq('id', id)
         .maybeSingle();
@@ -242,6 +288,13 @@ final class DemandRecordsRepository {
             quantity: (m['quantity'] as num?)?.toInt() ?? 1,
             unitPrice: (m['unit_price'] as num?)?.toDouble(),
             cancelled: m['cancelled'] == true,
+            brand: m['brand']?.toString(),
+            spec: m['spec']?.toString(),
+            unitLabel: m['unit_label']?.toString(),
+            category: m['category']?.toString(),
+            supplyCategoryKey: m['supply_category_key']?.toString(),
+            templateOptionId: m['template_option_id']?.toString(),
+            referenceNote: m['reference_note']?.toString(),
           ),
         );
       }

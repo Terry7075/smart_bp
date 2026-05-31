@@ -18,6 +18,10 @@ const _shopCorpus = <(String, AssistantShopIntent)>[
   ('記錄什麼', AssistantShopIntent.viewRecorded),
   ('不要了', AssistantShopIntent.cancelDemand),
   ('早安', AssistantShopIntent.casual),
+  ('我家衛生紙沒了', AssistantShopIntent.shortageSuggest),
+  ('衛生紙沒了', AssistantShopIntent.shortageSuggest),
+  ('沒有牛奶了', AssistantShopIntent.shortageSuggest),
+  ('米用完了', AssistantShopIntent.shortageSuggest),
   ('採買衛生紙', AssistantShopIntent.recordDemand),
   ('想買香蕉', AssistantShopIntent.recordDemand),
   ('衛生紙賣多少', AssistantShopIntent.queryPrice),
@@ -50,5 +54,11 @@ void main() {
     final r = AssistantShopIntentClassifier.classify('我要買米和醬油');
     expect(r.intent, AssistantShopIntent.recordDemand);
     expect(r.slots?.lines.length, greaterThanOrEqualTo(1));
+  });
+
+  test('缺貨語句會解析商品名稱', () {
+    final r = AssistantShopIntentClassifier.classify('我家衛生紙沒了');
+    expect(r.intent, AssistantShopIntent.shortageSuggest);
+    expect(r.slots?.singleProduct, '衛生紙');
   });
 }

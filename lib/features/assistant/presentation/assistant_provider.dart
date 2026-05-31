@@ -9,6 +9,9 @@ import 'package:smart_bp/features/assistant/data/assistant_snapshot_loader.dart'
 import 'package:smart_bp/features/assistant/domain/assistant_chat_session.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_message.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_nav_action.dart';
+import 'package:smart_bp/features/assistant/data/assistant_shop_action_service.dart';
+import 'package:smart_bp/features/shop/data/supply_dialogue_service.dart';
+import 'package:smart_bp/features/shop/domain/pending_supply_dialogue.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_history_provider.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -32,6 +35,7 @@ class AssistantChatState {
     this.viewingHistory = false,
     this.activeSessionId,
     this.selectedHistoryId,
+    this.pendingSupply,
   });
 
   final List<AssistantMessage> messages;
@@ -45,6 +49,7 @@ class AssistantChatState {
 
   /// 側邊欄選中的歷史場次 id。
   final String? selectedHistoryId;
+  final PendingSupplyDialogue? pendingSupply;
 
   bool get isFreshWelcome =>
       !viewingHistory && messages.length <= 1 && !messages.any((m) => m.isUser);
@@ -56,6 +61,8 @@ class AssistantChatState {
     String? activeSessionId,
     String? selectedHistoryId,
     bool clearSelectedHistory = false,
+    PendingSupplyDialogue? pendingSupply,
+    bool clearPendingSupply = false,
   }) {
     return AssistantChatState(
       messages: messages ?? this.messages,
@@ -65,6 +72,9 @@ class AssistantChatState {
       selectedHistoryId: clearSelectedHistory
           ? null
           : (selectedHistoryId ?? this.selectedHistoryId),
+      pendingSupply: clearPendingSupply
+          ? null
+          : (pendingSupply ?? this.pendingSupply),
     );
   }
 }
@@ -258,6 +268,63 @@ class AssistantChat extends Notifier<AssistantChatState> {
         conversation: state.messages,
       );
       final userId = _userId;
+      const supplyDialogue = SupplyDialogueService();
+
+      if (state.pendingSupply != null) {
+        final pending = state.pendingSupply!;
+        final handled = supplyDialogue.handlePending(
+          pending: pending,
+          userText: resolved,
+        );
+        if (handled.snapshot != null && userId != null) {
+          await ref.read(demandRecordsRepositoryProvider).addSnapshotLines(
+                userId: userId,
+                lines: [handled.snapshot!],
+              );
+        }
+        final reply = handled.reply;
+        if (reply != null) {
+          final assistantMsg = AssistantMessage(
+            role: AssistantMessageRole.assistant,
+            text: reply.text,
+            at: DateTime.now(),
+            actions: reply.actions,
+            intentLabel: '記錄需求',
+            brandChoices: reply.brandChoices,
+            categoryImageUrl: reply.categoryImageUrl,
+          );
+          state = state.copyWith(
+            messages: [...state.messages, assistantMsg],
+            loading: false,
+            pendingSupply: handled.next,
+            clearPendingSupply: handled.next == null && handled.snapshot != null,
+          );
+          await _persistActiveSession();
+          return;
+        }
+      }
+
+      final started = supplyDialogue.tryStartFromUtterance(resolved);
+      if (started != null) {
+        final ask = supplyDialogue.brandAskReplyFor(started);
+        final assistantMsg = AssistantMessage(
+          role: AssistantMessageRole.assistant,
+          text: ask.text,
+          at: DateTime.now(),
+          actions: ask.actions,
+          intentLabel: '記錄需求',
+          brandChoices: ask.brandChoices,
+          categoryImageUrl: ask.categoryImageUrl,
+        );
+        state = state.copyWith(
+          messages: [...state.messages, assistantMsg],
+          loading: false,
+          pendingSupply: started,
+        );
+        await _persistActiveSession();
+        return;
+      }
+
       final meta = await ref.read(assistantReplyOrchestratorProvider).replyWithMeta(
             question: resolved,
             snapshot: snapshot,
@@ -270,6 +337,8 @@ class AssistantChat extends Notifier<AssistantChatState> {
         at: DateTime.now(),
         actions: meta.reply.actions,
         intentLabel: meta.assistantIntentLabel,
+        brandChoices: meta.reply.brandChoices,
+        categoryImageUrl: meta.reply.categoryImageUrl,
       );
       state = state.copyWith(
         messages: [...state.messages, assistantMsg],

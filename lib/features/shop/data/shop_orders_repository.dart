@@ -1,3 +1,4 @@
+import 'package:smart_bp/features/shop/domain/supply_line_snapshot.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
@@ -17,7 +18,7 @@ final class ShopOrdersRepository {
 id, user_id, status, created_at, total_amount, is_urgent,
 assigned_volunteer_id, delivered_at, delivery_issue, location_point_id,
 location_points(name),
-order_items(product_id, product_name, quantity, unit_price, price_at_time, category, unit_label),
+order_items(product_id, product_name, quantity, unit_price, price_at_time, category, unit_label, brand, spec, supply_category_key, template_option_id, reference_note),
 order_delivery_events(id, order_id, event_type, note, created_at)
 ''';
 
@@ -145,12 +146,7 @@ order_delivery_events(id, order_id, event_type, note, created_at)
   /// 由 demand_records 草稿品項建立正式 orders（第五章語音／小幫手記錄後送出）。
   Future<String> createOrderFromDraftLines({
     required String userId,
-    required List<({
-      String productId,
-      String productName,
-      int quantity,
-      double? unitPrice,
-    })> lines,
+    required List<SupplyLineSnapshot> lines,
     String? locationPointId,
   }) async {
     if (lines.isEmpty) {
@@ -164,11 +160,8 @@ order_delivery_events(id, order_id, event_type, note, created_at)
       final price = line.unitPrice ?? 0;
       totalAmount += price * line.quantity;
       orderItems.add({
-        'product_id': line.productId.isEmpty ? 'draft_${line.productName}' : line.productId,
-        'product_name': line.productName,
-        'quantity': line.quantity,
+        ...line.toInsertMap(),
         'price_at_time': price.round(),
-        if (line.unitPrice != null) 'unit_price': line.unitPrice,
       });
     }
 
@@ -422,6 +415,11 @@ order_delivery_events(id, order_id, event_type, note, created_at)
           unitPrice: unit ?? priceAtTime,
           category: row['category']?.toString(),
           unitLabel: row['unit_label']?.toString(),
+          brand: row['brand']?.toString(),
+          spec: row['spec']?.toString(),
+          supplyCategoryKey: row['supply_category_key']?.toString(),
+          templateOptionId: row['template_option_id']?.toString(),
+          referenceNote: row['reference_note']?.toString(),
         ),
       );
     }
