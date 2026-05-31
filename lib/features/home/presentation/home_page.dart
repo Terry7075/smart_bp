@@ -11,7 +11,6 @@ import 'package:smart_bp/features/health_monitoring/presentation/elder_monitorin
 import 'package:smart_bp/features/home/presentation/notification_center_page.dart';
 import 'package:smart_bp/features/prescription/elder_prescription_sync.dart';
 import 'package:smart_bp/features/profile/profile_provider.dart';
-import 'package:smart_bp/features/shop/presentation/shop_page.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task.dart';
 
 /// 首頁底部導覽目前選中的索引（預設 0 = 首頁）。
@@ -30,7 +29,10 @@ class HomeBottomNavIndex extends Notifier<int> {
 
 /// 明德 e 達人 — 首頁（長輩友善大字體、高對比）。
 class HomePage extends ConsumerStatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.initialTab = 0});
+
+  /// 由路由 `?tab=` 或小幫手帶路指定底部導覽索引（0–5）。
+  final int initialTab;
 
   @override
   ConsumerState<HomePage> createState() => _HomePageState();
@@ -47,6 +49,19 @@ class _HomePageState extends ConsumerState<HomePage> {
   ];
 
   String? _lastSnackTaskId;
+
+  @override
+  void initState() {
+    super.initState();
+    final tab = widget.initialTab;
+    if (tab != 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref.read(homeBottomNavIndexProvider.notifier).select(tab);
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -179,11 +194,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         onTap: (index) {
           print('點擊了 ${_bottomNavLabels[index]}');
           if (index == 1) {
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const ShopPage(),
-              ),
-            );
+            context.push('/shop');
             return;
           }
           ref.read(homeBottomNavIndexProvider.notifier).select(index);
@@ -387,7 +398,11 @@ class _GreetingCard extends ConsumerWidget {
         Positioned(
           right: 12,
           top: 16,
-          child: _ChatShortcutCard(color: _orangeChat, onPrimary: colorScheme.onPrimary),
+          child: _ChatShortcutCard(
+            color: _orangeChat,
+            onPrimary: colorScheme.onPrimary,
+            onTap: () => context.push('/assistant'),
+          ),
         ),
       ],
     );
@@ -398,10 +413,12 @@ class _ChatShortcutCard extends StatelessWidget {
   const _ChatShortcutCard({
     required this.color,
     required this.onPrimary,
+    required this.onTap,
   });
 
   final Color color;
   final Color onPrimary;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -412,7 +429,7 @@ class _ChatShortcutCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: () => print('點擊了 聊聊天'),
+        onTap: onTap,
         child: SizedBox(
           width: 96,
           height: 96,
@@ -421,15 +438,16 @@ class _ChatShortcutCard extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.smart_toy, size: 40, color: onPrimary),
-                const SizedBox(height: 6),
+                Icon(Icons.smart_toy, size: 44, color: onPrimary),
+                const SizedBox(height: 8),
                 Text(
-                  '聊聊天',
+                  '小幫手',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: onPrimary,
+                    height: 1.15,
                   ),
                 ),
               ],

@@ -107,9 +107,24 @@ class NotificationService {
       _goCheckin(rest.substring(0, sep), rest.substring(sep + 1));
       return;
     }
+
     if (payload.startsWith(kPayloadHealthAlertPrefix)) {
       _go('/');
       return;
+    }
+
+    // 領藥提醒：回首頁即可。
+    if (payload.startsWith('mindu_pickup|')) {
+      _navigate?.call('/home');
+      return;
+    }
+
+    // 訂單狀態通知：跳轉訂單詳情頁。
+    if (payload.startsWith('mindu_order|')) {
+      final orderId = payload.substring('mindu_order|'.length);
+      if (orderId.isNotEmpty) {
+        _navigate?.call('/shop/orders/$orderId');
+      }
     }
   }
 
@@ -151,6 +166,14 @@ class NotificationService {
   static const String _medicationChannelId = 'mindu_medication_reminder';
   static const String _medicationChannelName = '吃藥時間提醒';
   static const String _medicationChannelDesc = '每天在固定時間叮咚提醒長輩按時服藥';
+
+  static const String _pickupChannelId = 'mindu_prescription_pickup';
+  static const String _pickupChannelName = '回診領藥提醒';
+  static const String _pickupChannelDesc = '在下次領藥日當天提醒長輩記得回診拿藥';
+
+  static const String _orderChannelId = 'mindu_order_status';
+  static const String _orderChannelName = '物資訂單狀態';
+  static const String _orderChannelDesc = '志工接單或完成訂單時即時通知長輩';
 
   /// 每張藥單最多排的「吃藥時段」數（對應連續 notification id）。
   static const int maxMedicationSlotsPerPrescription = 12;
@@ -253,6 +276,49 @@ class NotificationService {
       sound: true,
     );
     return granted ?? false;
+  }
+
+  /// 即時顯示訂單狀態通知（不排程，立即出現）。
+  ///
+  /// [orderId] 可作為 payload，點擊後跳轉 `/shop/orders/:id`。
+  Future<void> showOrderStatusNotification({
+    required String title,
+    required String body,
+    String? orderId,
+    int notificationId = 1,
+  }) async {
+    if (!_initialized) await init();
+    if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) return;
+
+    final details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        _orderChannelId,
+        _orderChannelName,
+        channelDescription: _orderChannelDesc,
+        importance: Importance.high,
+        priority: Priority.high,
+        playSound: true,
+        enableVibration: true,
+      ),
+      iOS: const DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      ),
+    );
+
+    final payload = orderId != null ? 'mindu_order|$orderId' : null;
+    try {
+      await _plugin.show(
+        id: notificationId,
+        title: title,
+        body: body,
+        notificationDetails: details,
+        payload: payload,
+      );
+    } catch (e) {
+      debugPrint('[NotificationService] showOrderStatusNotification failed: $e');
+    }
   }
 
   /// 緊急／除錯用：取消「全部」本機排程與通知。

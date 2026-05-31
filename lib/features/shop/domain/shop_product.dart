@@ -18,6 +18,7 @@ class ShopProduct {
     this.imageUrl,
     this.productId,
     this.backupSearchKeyword,
+    this.pxSearchKeywordOverride,
   });
 
   final String id;
@@ -36,24 +37,47 @@ class ShopProduct {
   final String? productId;
   final String? backupSearchKeyword;
 
-  /// 與「全聯搜尋」按鈕相同：品牌／備援關鍵字／規格（較完整，方便對應促銷組與連結）。
+  /// 若設定，「全聯搜尋」與縮圖關鍵字**僅用此字串**（例如手填商品由使用者自訂關鍵字）。
+  final String? pxSearchKeywordOverride;
+
+  /// 與「全聯搜尋」按鈕相同：品牌＋品名核心；**會去掉 kg／包數／組合數字**，
+  /// 避免活動檔期規格變動時搜「2.5kg×6包」反而查無商品。
   String get pxMartSearchKeyword {
+    final override = pxSearchKeywordOverride?.trim();
+    if (override != null && override.isNotEmpty) return override;
+
     final fromSeed = backupSearchKeyword?.trim();
     final n = name.trim();
     final sp = spec?.trim() ?? '';
     final brand = RegExp(r'【([^】]+)】').firstMatch(n)?.group(1)?.trim() ?? '';
+    final titleNoBracket =
+        n.replaceAll(RegExp(r'【[^】]*】'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+
     final parts = <String>[
       if (brand.isNotEmpty) brand,
       if (fromSeed != null && fromSeed.isNotEmpty) fromSeed,
       if (sp.isNotEmpty) sp,
+      if (titleNoBracket.isNotEmpty) titleNoBracket,
     ];
-    if (parts.isEmpty) return n;
-    return parts.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    final joined = parts.isEmpty
+        ? n
+        : parts.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    final cleaned = ShopProduct._stripPromoAndPackagingForImageSearch(joined);
+    if (cleaned.isNotEmpty) return cleaned;
+    if (brand.isNotEmpty) return brand;
+    final fromName = ShopProduct._stripPromoAndPackagingForImageSearch(n);
+    return fromName.isNotEmpty ? fromName : n;
   }
 
   /// 給全聯「搜尋縮圖」用：弱化容量、包數、價格與促銷字眼，較接近單品主圖。
   /// （對外開啟全聯仍用 [pxMartSearchKeyword]。）
   String get pxMartImageSearchKeyword {
+    final override = pxSearchKeywordOverride?.trim();
+    if (override != null && override.isNotEmpty) {
+      final stripped = ShopProduct._stripPromoAndPackagingForImageSearch(override);
+      return stripped.isNotEmpty ? stripped : override;
+    }
+
     final n = name.trim();
     final brand = RegExp(r'【([^】]+)】').firstMatch(n)?.group(1)?.trim() ?? '';
     final fromSeed = backupSearchKeyword?.trim();
@@ -96,6 +120,11 @@ class ShopProduct {
       RegExp(r'\d+\.?\d*\s*(kg|g|ml|mL|ML|L)(?=\s|$|[^a-zA-Z])', caseSensitive: false),
       ' ',
     );
+    // 小數被拆成「2 5kg」時仍視為容量，整段移除
+    t = t.replaceAll(
+      RegExp(r'\d+\s+\d+\s*(kg|g|ml|mL|ML|L)\b', caseSensitive: false),
+      ' ',
+    );
     t = t.replaceAll(RegExp(r'\b\d+\b'), ' ');
     return t.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
@@ -134,6 +163,7 @@ class ShopProduct {
   /// 複製並覆寫欄位（例如載入後套用爬蟲圖網址）。
   ShopProduct copyWith({
     String? imageUrl,
+    String? pxSearchKeywordOverride,
   }) {
     return ShopProduct(
       id: id,
@@ -151,6 +181,7 @@ class ShopProduct {
       imageUrl: imageUrl ?? this.imageUrl,
       productId: productId,
       backupSearchKeyword: backupSearchKeyword,
+      pxSearchKeywordOverride: pxSearchKeywordOverride ?? this.pxSearchKeywordOverride,
     );
   }
 
@@ -174,6 +205,11 @@ class ShopProduct {
       ),
       productId: _firstString(json, const ['productId', '商品ID']),
       backupSearchKeyword: _firstString(json, const ['backupSearchKeyword', '備援搜尋關鍵字']),
+      pxSearchKeywordOverride: _firstString(json, const [
+        'pxSearchKeywordOverride',
+        'pxSearchKeyword',
+        '全聯搜尋關鍵字',
+      ]),
     );
   }
 
@@ -272,6 +308,7 @@ class ShopProduct {
       imageUrl: _extractUrl(imageLine),
       productId: productId,
       backupSearchKeyword: _searchKeywordFromTitle(titleLine),
+      pxSearchKeywordOverride: null,
       fetchedAt: DateTime.now().toIso8601String(),
       confidence: 'medium',
       notes: '由 Comet 條列文字自動解析，請下單前再次確認通路價格。',

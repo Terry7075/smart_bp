@@ -21,6 +21,10 @@ class Profile {
   /// 「志工」角色字串（資料庫端值）。
   static const String kRoleVolunteer = 'volunteer';
 
+  static const String kRoleFamily = 'family';
+
+  static const String kRoleAdmin = 'admin';
+
   final String id;
   final String name;
   final String? phone;
@@ -43,6 +47,10 @@ class Profile {
 
   /// 是否為長輩身分（預設角色）。
   bool get isElder => role == kRoleElder;
+
+  bool get isFamily => role == kRoleFamily;
+
+  bool get isAdmin => role == kRoleAdmin;
 
   /// 不可變更新，方便編輯頁先做樂觀更新。
   Profile copyWith({String? name, String? phone, String? role}) => Profile(

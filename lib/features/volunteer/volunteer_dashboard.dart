@@ -79,6 +79,11 @@ class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard>
               onPressed: _refreshAll,
             ),
             IconButton(
+              tooltip: '物資／柑仔店代購',
+              icon: const Icon(Icons.storefront, size: 28),
+              onPressed: () => context.push('/volunteer/shop-orders'),
+            ),
+            IconButton(
               tooltip: '學習內容管理',
               icon: const Icon(Icons.library_add_outlined, size: 28),
               onPressed: () => context.push('/volunteer-content-manage'),
