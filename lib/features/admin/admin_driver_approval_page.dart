@@ -3,20 +3,47 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
 
-class AdminDriverApprovalPage extends ConsumerWidget {
+class AdminDriverApprovalPage extends ConsumerStatefulWidget {
   const AdminDriverApprovalPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AdminDriverApprovalPage> createState() =>
+      _AdminDriverApprovalPageState();
+}
+
+class _AdminDriverApprovalPageState
+    extends ConsumerState<AdminDriverApprovalPage> {
+  String? _reviewingDriverId;
+
+  @override
+  Widget build(BuildContext context) {
     final applications = ref.watch(pendingDriverApplicationsProvider);
 
     Future<void> review(String driverId, String status) async {
-      await ref.read(driverServiceProvider).reviewApplication(
-            driverId: driverId,
-            approvalStatus: status,
+      setState(() => _reviewingDriverId = driverId);
+      try {
+        await ref.read(driverServiceProvider).reviewApplication(
+              driverId: driverId,
+              approvalStatus: status,
+            );
+        ref.invalidate(pendingDriverApplicationsProvider);
+        ref.invalidate(approvedDriversProvider);
+        ref.invalidate(adminDashboardStatsProvider);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text(status == 'approved' ? '已通過司機申請' : '已拒絕司機申請')),
           );
-      ref.invalidate(pendingDriverApplicationsProvider);
-      ref.invalidate(approvedDriversProvider);
+        }
+      } catch (error) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('審核失敗：$error')),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _reviewingDriverId = null);
+      }
     }
 
     return Scaffold(
@@ -29,13 +56,15 @@ class AdminDriverApprovalPage extends ConsumerWidget {
                 itemCount: items.length,
                 itemBuilder: (context, index) {
                   final driver = items[index];
+                  final reviewing = _reviewingDriverId == driver.id;
                   return Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(driver.name, style: Theme.of(context).textTheme.titleMedium),
+                          Text(driver.name,
+                              style: Theme.of(context).textTheme.titleMedium),
                           Text('電話：${driver.phone}'),
                           Text('地址：${driver.address}'),
                           Text('車牌：${driver.carPlate}'),
@@ -46,15 +75,19 @@ class AdminDriverApprovalPage extends ConsumerWidget {
                             children: [
                               Expanded(
                                 child: FilledButton(
-                                  onPressed: () => review(driver.id, 'approved'),
-                                  child: const Text('通過'),
+                                  onPressed: _reviewingDriverId == null
+                                      ? () => review(driver.id, 'approved')
+                                      : null,
+                                  child: Text(reviewing ? '處理中...' : '通過'),
                                 ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: OutlinedButton(
-                                  onPressed: () => review(driver.id, 'rejected'),
-                                  child: const Text('拒絕'),
+                                  onPressed: _reviewingDriverId == null
+                                      ? () => review(driver.id, 'rejected')
+                                      : null,
+                                  child: Text(reviewing ? '處理中...' : '拒絕'),
                                 ),
                               ),
                             ],

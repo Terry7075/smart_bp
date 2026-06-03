@@ -52,7 +52,8 @@ class RideService {
         .order('ride_date', ascending: false)
         .map(
           (rows) => rows
-              .map((row) => RideRequest.fromJson(Map<String, dynamic>.from(row)))
+              .map(
+                  (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)))
               .toList(),
         );
   }
@@ -66,7 +67,8 @@ class RideService {
         .order('ride_time')
         .map(
           (rows) => rows
-              .map((row) => RideRequest.fromJson(Map<String, dynamic>.from(row)))
+              .map(
+                  (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)))
               .toList(),
         );
   }
@@ -84,10 +86,26 @@ class RideService {
   }
 
   Future<void> acceptRide(String rideRequestId) async {
-    await _client.rpc('accept_ride', params: {'p_ride_request_id': rideRequestId});
+    await _client
+        .rpc('accept_ride', params: {'p_ride_request_id': rideRequestId});
   }
 
-  Future<List<RideRequest>> fetchAdminPendingRideRequests() => fetchPendingRideRequests();
+  Stream<List<RideRequest>> watchAdminRideRequests() {
+    return _client
+        .from('ride_requests')
+        .stream(primaryKey: ['id'])
+        .order('ride_date', ascending: false)
+        .order('ride_time')
+        .map(
+          (rows) => rows
+              .map(
+                  (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)))
+              .toList(),
+        );
+  }
+
+  Future<List<RideRequest>> fetchAdminPendingRideRequests() =>
+      fetchPendingRideRequests();
 
   Future<void> manualMatchRide({
     required String rideRequestId,
@@ -135,13 +153,18 @@ class RideService {
   }
 
   Future<Driver?> fetchDriverById(String driverId) async {
-    final row = await _client.from('drivers').select().eq('id', driverId).maybeSingle();
+    final row =
+        await _client.from('drivers').select().eq('id', driverId).maybeSingle();
     if (row == null) return null;
     return Driver.fromJson(Map<String, dynamic>.from(row));
   }
 
   Future<Profile?> fetchProfileById(String profileId) async {
-    final row = await _client.from('profiles').select().eq('id', profileId).maybeSingle();
+    final row = await _client
+        .from('profiles')
+        .select()
+        .eq('id', profileId)
+        .maybeSingle();
     if (row == null) return null;
     return Profile.fromJson(Map<String, dynamic>.from(row));
   }
@@ -208,7 +231,8 @@ class RideService {
         .order('ride_time')
         .map(
           (rows) => rows
-              .map((row) => RideRequest.fromJson(Map<String, dynamic>.from(row)))
+              .map(
+                  (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)))
               .toList(),
         );
   }

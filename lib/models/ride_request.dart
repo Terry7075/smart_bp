@@ -16,6 +16,7 @@ class RideRequest {
     this.note,
     this.distanceKm,
     this.estimatedPrice,
+    this.standingRideRequestId,
   });
 
   final String id;
@@ -31,10 +32,12 @@ class RideRequest {
   final String? note;
   final num? distanceKm;
   final int? estimatedPrice;
+  final String? standingRideRequestId;
   final RideStatus status;
 
-  String get displayDestination =>
-      destination == '自行輸入地點' ? (customDestination ?? destination) : destination;
+  String get displayDestination => destination == '自行輸入地點'
+      ? (customDestination ?? destination)
+      : destination;
 
   factory RideRequest.fromJson(Map<String, dynamic> json) => RideRequest(
         id: json['id'] as String,
@@ -50,6 +53,7 @@ class RideRequest {
         note: json['note'] as String?,
         distanceKm: json['distance_km'] as num?,
         estimatedPrice: json['estimated_price'] as int?,
+        standingRideRequestId: json['standing_ride_request_id'] as String?,
         status: RideStatusX.fromDatabase(json['status'] as String),
       );
 }

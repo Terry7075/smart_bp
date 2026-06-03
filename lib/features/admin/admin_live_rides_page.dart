@@ -81,7 +81,8 @@ class _LiveRideCardState extends ConsumerState<_LiveRideCard> {
   Future<_AdminRideDetail> _load() async {
     final service = ref.read(rideServiceProvider);
     final match = await service.fetchMatchForRideRequest(widget.ride.id);
-    final driver = match == null ? null : await service.fetchDriverById(match.driverId);
+    final driver =
+        match == null ? null : await service.fetchDriverById(match.driverId);
     return _AdminRideDetail(match: match, driver: driver);
   }
 
@@ -103,8 +104,12 @@ class _LiveRideCardState extends ConsumerState<_LiveRideCard> {
           decoration: const InputDecoration(labelText: '原因'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('返回')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('取消行程')),
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('返回')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('取消行程')),
         ],
       ),
     );
@@ -127,7 +132,8 @@ class _LiveRideCardState extends ConsumerState<_LiveRideCard> {
     );
     if (dateResult == null || !mounted) return;
     date = dateResult;
-    final timeResult = await showTimePicker(context: context, initialTime: time);
+    final timeResult =
+        await showTimePicker(context: context, initialTime: time);
     if (timeResult == null) return;
     time = timeResult;
 
@@ -141,7 +147,7 @@ class _LiveRideCardState extends ConsumerState<_LiveRideCard> {
   }
 
   Future<void> _reassign() async {
-    Driver? selected;
+    String? selectedDriverId;
     final candidates = widget.drivers
         .where((driver) => driver.maxPassengers >= widget.ride.passengerCount)
         .toList();
@@ -150,31 +156,36 @@ class _LiveRideCardState extends ConsumerState<_LiveRideCard> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: const Text('改派司機'),
-          content: DropdownButtonFormField<Driver>(
-            initialValue: selected,
+          content: DropdownButtonFormField<String>(
+            initialValue: selectedDriverId,
             decoration: const InputDecoration(labelText: '選擇司機'),
             items: candidates
                 .map((driver) => DropdownMenuItem(
-                      value: driver,
+                      value: driver.id,
                       child: Text('${driver.name} / ${driver.maxPassengers} 人'),
                     ))
                 .toList(),
-            onChanged: (value) => setDialogState(() => selected = value),
+            onChanged: (value) =>
+                setDialogState(() => selectedDriverId = value),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('取消')),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消')),
             FilledButton(
-              onPressed: selected == null ? null : () => Navigator.of(context).pop(true),
+              onPressed: selectedDriverId == null
+                  ? null
+                  : () => Navigator.of(context).pop(true),
               child: const Text('改派'),
             ),
           ],
         ),
       ),
     );
-    if (confirmed != true || selected == null) return;
+    if (confirmed != true || selectedDriverId == null) return;
     await ref.read(rideServiceProvider).reassignRide(
           rideRequestId: widget.ride.id,
-          newDriverId: selected!.id,
+          newDriverId: selectedDriverId!,
         );
     await _reload();
   }
@@ -220,7 +231,8 @@ class _LiveRideCardState extends ConsumerState<_LiveRideCard> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                Text('時間：${DateFormat('yyyy/MM/dd').format(widget.ride.rideDate)} ${widget.ride.rideTime.substring(0, 5)}'),
+                Text(
+                    '時間：${DateFormat('yyyy/MM/dd').format(widget.ride.rideDate)} ${widget.ride.rideTime.substring(0, 5)}'),
                 Text('上車：${widget.ride.pickupLocation}'),
                 Text('乘客數：${widget.ride.passengerCount}'),
                 Text('司機：${detail?.driver?.name ?? '尚未媒合'}'),
@@ -286,7 +298,8 @@ class _LiveRideCardState extends ConsumerState<_LiveRideCard> {
   }
 
   bool _isDelayed(RideRequest ride) {
-    if (ride.status == RideStatus.completed || ride.status == RideStatus.cancelled) {
+    if (ride.status == RideStatus.completed ||
+        ride.status == RideStatus.cancelled) {
       return false;
     }
     final parts = ride.rideTime.split(':');

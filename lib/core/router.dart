@@ -5,17 +5,20 @@ import '../features/admin/admin_dashboard_page.dart';
 import '../features/admin/admin_driver_approval_page.dart';
 import '../features/admin/admin_live_rides_page.dart';
 import '../features/admin/admin_match_page.dart';
+import '../features/admin/admin_standing_rides_page.dart';
 import '../features/auth/login_page.dart';
 import '../features/auth/role_gate_page.dart';
 import '../features/driver/driver_active_ride_page.dart';
 import '../features/driver/driver_application_page.dart';
 import '../features/driver/driver_available_requests_page.dart';
+import '../features/driver/create_driver_standing_ride_offer_page.dart';
 import '../features/driver/driver_home_page.dart';
 import '../features/driver/driver_pending_approval_page.dart';
 import '../features/elder/create_ride_request_page.dart';
 import '../features/elder/elder_home_page.dart';
 import '../features/elder/elder_ride_detail_page.dart';
 import '../features/elder/elder_ride_history_page.dart';
+import '../features/elder/elder_standing_rides_page.dart';
 import '../features/notifications/notifications_page.dart';
 import '../features/profile/profile_page.dart';
 import '../features/profile/profile_setup_page.dart';
@@ -35,7 +38,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isLoggingIn = location == '/login';
       final isSettingProfile = location == '/profile/setup';
       final isRoot = location == '/';
-      final isCommonRoute = location == '/notifications' || location == '/profile';
+      final isCommonRoute =
+          location == '/notifications' || location == '/profile';
 
       if (session == null) {
         return isLoggingIn ? null : '/login';
@@ -70,21 +74,40 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/', builder: (_, __) => const RoleGatePage()),
       GoRoute(path: '/login', builder: (_, __) => const LoginPage()),
       GoRoute(path: '/profile', builder: (_, __) => const ProfilePage()),
-      GoRoute(path: '/profile/setup', builder: (_, __) => const ProfileSetupPage()),
-      GoRoute(path: '/notifications', builder: (_, __) => const NotificationsPage()),
+      GoRoute(
+          path: '/profile/setup', builder: (_, __) => const ProfileSetupPage()),
+      GoRoute(
+          path: '/notifications',
+          builder: (_, __) => const NotificationsPage()),
       GoRoute(path: '/elder', builder: (_, __) => const ElderHomePage()),
-      GoRoute(path: '/elder/create', builder: (_, __) => const CreateRideRequestPage()),
-      GoRoute(path: '/elder/history', builder: (_, __) => const ElderRideHistoryPage()),
+      GoRoute(
+          path: '/elder/create',
+          builder: (_, __) => const CreateRideRequestPage()),
+      GoRoute(
+          path: '/elder/standing',
+          builder: (_, __) => const ElderStandingRidesPage()),
+      GoRoute(
+          path: '/elder/history',
+          builder: (_, __) => const ElderRideHistoryPage()),
       GoRoute(
         path: '/elder/ride/:id',
-        builder: (_, state) => ElderRideDetailPage(rideRequestId: state.pathParameters['id']!),
+        builder: (_, state) =>
+            ElderRideDetailPage(rideRequestId: state.pathParameters['id']!),
       ),
-      GoRoute(path: '/driver/apply', builder: (_, __) => const DriverApplicationPage()),
-      GoRoute(path: '/driver/pending', builder: (_, __) => const DriverPendingApprovalPage()),
+      GoRoute(
+          path: '/driver/apply',
+          builder: (_, __) => const DriverApplicationPage()),
+      GoRoute(
+          path: '/driver/pending',
+          builder: (_, __) => const DriverPendingApprovalPage()),
       GoRoute(path: '/driver', builder: (_, __) => const DriverHomePage()),
       GoRoute(
         path: '/driver/available',
         builder: (_, __) => const DriverAvailableRequestsPage(),
+      ),
+      GoRoute(
+        path: '/driver/standing/create',
+        builder: (_, __) => const CreateDriverStandingRideOfferPage(),
       ),
       GoRoute(
         path: '/driver/active/:matchId/:rideRequestId',
@@ -99,7 +122,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const AdminDriverApprovalPage(),
       ),
       GoRoute(path: '/admin/match', builder: (_, __) => const AdminMatchPage()),
-      GoRoute(path: '/admin/live', builder: (_, __) => const AdminLiveRidesPage()),
+      GoRoute(
+          path: '/admin/standing',
+          builder: (_, __) => const AdminStandingRidesPage()),
+      GoRoute(
+          path: '/admin/live', builder: (_, __) => const AdminLiveRidesPage()),
     ],
   );
 });

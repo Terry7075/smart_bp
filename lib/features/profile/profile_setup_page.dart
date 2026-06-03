@@ -42,17 +42,20 @@ class _ProfileSetupPageState extends ConsumerState<ProfileSetupPage> {
             emergencyContactPhone: _emergencyPhoneController.text,
             emergencyContactRelation: _emergencyRelationController.text,
           );
+      if (!mounted) return;
       ref.invalidate(currentProfileProvider);
-      if (mounted) context.go('/');
+      context.go('/');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _signOut() async {
-    await ref.read(authServiceProvider).signOut();
+    final authService = ref.read(authServiceProvider);
+    await authService.signOut();
+    if (!mounted) return;
     ref.invalidate(currentProfileProvider);
-    if (mounted) context.go('/login');
+    context.go('/login');
   }
 
   @override
@@ -64,7 +67,8 @@ class _ProfileSetupPageState extends ConsumerState<ProfileSetupPage> {
       _phoneController.text = profile.phone ?? '';
       _emergencyNameController.text = profile.emergencyContactName ?? '';
       _emergencyPhoneController.text = profile.emergencyContactPhone ?? '';
-      _emergencyRelationController.text = profile.emergencyContactRelation ?? '';
+      _emergencyRelationController.text =
+          profile.emergencyContactRelation ?? '';
     }
 
     return Scaffold(
@@ -78,51 +82,54 @@ class _ProfileSetupPageState extends ConsumerState<ProfileSetupPage> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: '姓名'),
-                validator: (value) =>
-                    value == null || value.trim().isEmpty ? '請輸入姓名' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: '電話'),
-                validator: (value) =>
-                    value == null || value.trim().isEmpty ? '請輸入電話' : null,
-              ),
-              const SizedBox(height: 28),
-              Text('緊急聯絡人', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _emergencyNameController,
-                decoration: const InputDecoration(labelText: '聯絡人姓名'),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _emergencyPhoneController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: '聯絡人電話'),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _emergencyRelationController,
-                decoration: const InputDecoration(labelText: '關係'),
-              ),
-              const SizedBox(height: 28),
-              FilledButton(
-                onPressed: _saving ? null : _save,
-                child: Text(_saving ? '儲存中...' : '儲存'),
-              ),
-            ],
+      body: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(labelText: '姓名'),
+                  validator: (value) =>
+                      value == null || value.trim().isEmpty ? '請輸入姓名' : null,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: '電話'),
+                  validator: (value) =>
+                      value == null || value.trim().isEmpty ? '請輸入電話' : null,
+                ),
+                const SizedBox(height: 28),
+                Text('緊急聯絡人', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _emergencyNameController,
+                  decoration: const InputDecoration(labelText: '聯絡人姓名'),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _emergencyPhoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: '聯絡人電話'),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _emergencyRelationController,
+                  decoration: const InputDecoration(labelText: '關係'),
+                ),
+                const SizedBox(height: 28),
+                FilledButton(
+                  onPressed: _saving ? null : _save,
+                  child: Text(_saving ? '儲存中...' : '儲存'),
+                ),
+              ],
+            ),
           ),
         ),
       ),

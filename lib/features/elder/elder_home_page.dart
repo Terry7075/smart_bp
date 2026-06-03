@@ -28,15 +28,19 @@ class ElderHomePage extends ConsumerWidget {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
+      body: SafeArea(
+        top: false,
         child: rides.when(
           data: (items) {
-            final active = items.where((ride) =>
-                ride.status != RideStatus.completed && ride.status != RideStatus.cancelled).toList();
+            final active = items
+                .where((ride) =>
+                    ride.status != RideStatus.completed &&
+                    ride.status != RideStatus.cancelled)
+                .toList();
             final current = active.isEmpty ? null : active.first;
 
             return SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -51,14 +55,18 @@ class ElderHomePage extends ConsumerWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(current.status.label,
-                                    style: Theme.of(context).textTheme.headlineMedium),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .headlineMedium),
                                 const SizedBox(height: 12),
                                 Text('目的地：${current.displayDestination}'),
-                                Text('日期：${DateFormat('yyyy/MM/dd').format(current.rideDate)}'),
+                                Text(
+                                    '日期：${DateFormat('yyyy/MM/dd').format(current.rideDate)}'),
                                 Text('時間：${current.rideTime.substring(0, 5)}'),
                                 const SizedBox(height: 12),
                                 OutlinedButton(
-                                  onPressed: () => context.push('/elder/ride/${current.id}'),
+                                  onPressed: () =>
+                                      context.push('/elder/ride/${current.id}'),
                                   child: const Text('查看詳情'),
                                 ),
                               ],
@@ -70,6 +78,12 @@ class ElderHomePage extends ConsumerWidget {
                     onPressed: () => context.push('/elder/create'),
                     icon: const Icon(Icons.add),
                     label: const Text('新增接送'),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () => context.push('/elder/standing'),
+                    icon: const Icon(Icons.event_repeat),
+                    label: const Text('長期接送申請'),
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton(
