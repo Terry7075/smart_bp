@@ -18,7 +18,8 @@ class DriverActiveRidePage extends ConsumerStatefulWidget {
   final String rideRequestId;
 
   @override
-  ConsumerState<DriverActiveRidePage> createState() => _DriverActiveRidePageState();
+  ConsumerState<DriverActiveRidePage> createState() =>
+      _DriverActiveRidePageState();
 }
 
 class _DriverActiveRidePageState extends ConsumerState<DriverActiveRidePage> {
@@ -42,14 +43,17 @@ class _DriverActiveRidePageState extends ConsumerState<DriverActiveRidePage> {
   Future<_ActiveRideData> _load() async {
     final service = ref.read(rideServiceProvider);
     final ride = await service.fetchRideRequestById(widget.rideRequestId);
-    final elder = ride == null ? null : await service.fetchProfileById(ride.elderId);
+    final elder =
+        ride == null ? null : await service.fetchProfileById(ride.elderId);
     _localStatus ??= ride?.status;
     return _ActiveRideData(ride: ride, elder: elder);
   }
 
   Future<void> _startTracking() async {
     try {
-      await ref.read(locationTrackingServiceProvider).startForegroundTracking(widget.matchId);
+      await ref
+          .read(locationTrackingServiceProvider)
+          .startForegroundTracking(widget.matchId);
       if (mounted) setState(() => _trackingError = null);
     } catch (error) {
       if (mounted) setState(() => _trackingError = '$error');
@@ -57,7 +61,9 @@ class _DriverActiveRidePageState extends ConsumerState<DriverActiveRidePage> {
   }
 
   Future<void> _update(RideStatus status) async {
-    await ref.read(rideServiceProvider).updateMatchStatus(matchId: widget.matchId, status: status);
+    await ref
+        .read(rideServiceProvider)
+        .updateMatchStatus(matchId: widget.matchId, status: status);
     if (status == RideStatus.completed) {
       ref.read(locationTrackingServiceProvider).stopTracking();
     }
@@ -75,30 +81,36 @@ class _DriverActiveRidePageState extends ConsumerState<DriverActiveRidePage> {
   }
 
   Future<void> _navigateTo(RideRequest ride) async {
-    await ref.read(driverActionServiceProvider).openNavigation(ride.displayDestination);
+    await ref
+        .read(driverActionServiceProvider)
+        .openNavigation(ride.displayDestination);
   }
 
   @override
   Widget build(BuildContext context) {
-    final location = ref.watch(driverLocationForRideProvider(widget.rideRequestId));
+    final location =
+        ref.watch(driverLocationForRideProvider(widget.rideRequestId));
 
     return Scaffold(
       appBar: AppBar(title: const Text('進行中任務')),
       body: FutureBuilder<_ActiveRideData>(
         future: _future,
         builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
           final ride = snapshot.data!.ride;
           final elder = snapshot.data!.elder;
           if (ride == null) return const Center(child: Text('找不到任務'));
 
           final status = _localStatus ?? ride.status;
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(ride.displayDestination, style: Theme.of(context).textTheme.headlineMedium),
+                Text(ride.displayDestination,
+                    style: Theme.of(context).textTheme.headlineMedium),
                 const SizedBox(height: 8),
                 Text('目前狀態：${status.label}'),
                 const SizedBox(height: 12),
@@ -118,13 +130,15 @@ class _DriverActiveRidePageState extends ConsumerState<DriverActiveRidePage> {
                   const SizedBox(height: 8),
                   Text(
                     '定位未啟用：$_trackingError',
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error),
                   ),
                 ],
                 const SizedBox(height: 16),
                 Text('上車點：${ride.pickupLocation}'),
                 Text('乘客數：${ride.passengerCount}'),
-                if (ride.needReturn) Text('需要回程：${ride.returnTime?.substring(0, 5) ?? '未指定'}'),
+                if (ride.needReturn)
+                  Text('需要回程：${ride.returnTime?.substring(0, 5) ?? '未指定'}'),
                 if (ride.note != null) Text('備註：${ride.note}'),
                 if (elder != null) ...[
                   const SizedBox(height: 12),

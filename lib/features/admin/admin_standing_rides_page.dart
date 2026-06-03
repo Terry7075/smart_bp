@@ -25,14 +25,15 @@ class _AdminStandingRidesPageState
 
     return Scaffold(
       appBar: AppBar(title: const Text('長期接送方案審核')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
+      body: SafeArea(
+        top: false,
         child: RefreshIndicator(
           onRefresh: () async {
             ref.invalidate(adminDriverStandingRideOffersProvider);
             ref.invalidate(pendingDriverStandingRideOffersProvider);
           },
           child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             children: [
               Text('司機可服務方案', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),

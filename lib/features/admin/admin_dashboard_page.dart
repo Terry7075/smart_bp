@@ -25,51 +25,57 @@ class AdminDashboardPage extends ConsumerWidget {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: stats.when(
-          data: (item) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    _MetricCard(label: '待媒合接送', value: item.pendingRideCount),
-                    _MetricCard(label: '今日行程', value: item.todayRideCount),
-                    _MetricCard(label: '今日已媒合', value: item.todayMatchedCount),
-                    _MetricCard(label: '進行中接送', value: item.inProgressCount),
-                    _MetricCard(label: '待審核司機', value: item.pendingDriverCount),
-                    _MetricCard(
-                        label: '待審長期接送', value: item.pendingStandingRideCount),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: () => context.push('/admin/drivers'),
-                  child: const Text('司機審核'),
-                ),
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: () => context.push('/admin/standing'),
-                  child: const Text('長期接送審核'),
-                ),
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: () => context.push('/admin/match'),
-                  child: const Text('接送媒合'),
-                ),
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: () => context.push('/admin/live'),
-                  child: const Text('即時狀態監控'),
-                ),
-              ],
-            );
-          },
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) => Center(child: Text('讀取失敗：$error')),
+      body: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          child: stats.when(
+            data: (item) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _MetricCard(label: '待媒合接送', value: item.pendingRideCount),
+                      _MetricCard(label: '今日行程', value: item.todayRideCount),
+                      _MetricCard(
+                          label: '今日已媒合', value: item.todayMatchedCount),
+                      _MetricCard(label: '進行中接送', value: item.inProgressCount),
+                      _MetricCard(
+                          label: '待審核司機', value: item.pendingDriverCount),
+                      _MetricCard(
+                          label: '待審長期接送',
+                          value: item.pendingStandingRideCount),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton(
+                    onPressed: () => context.push('/admin/drivers'),
+                    child: const Text('司機審核'),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: () => context.push('/admin/standing'),
+                    child: const Text('長期接送審核'),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: () => context.push('/admin/match'),
+                    child: const Text('接送媒合'),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: () => context.push('/admin/live'),
+                    child: const Text('即時狀態監控'),
+                  ),
+                ],
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => Center(child: Text('讀取失敗：$error')),
+          ),
         ),
       ),
     );

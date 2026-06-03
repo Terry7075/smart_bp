@@ -10,7 +10,8 @@ class CreateRideRequestPage extends ConsumerStatefulWidget {
   const CreateRideRequestPage({super.key});
 
   @override
-  ConsumerState<CreateRideRequestPage> createState() => _CreateRideRequestPageState();
+  ConsumerState<CreateRideRequestPage> createState() =>
+      _CreateRideRequestPageState();
 }
 
 class _CreateRideRequestPageState extends ConsumerState<CreateRideRequestPage> {
@@ -81,7 +82,9 @@ class _CreateRideRequestPageState extends ConsumerState<CreateRideRequestPage> {
             rideTime: _formatTime(_rideTime),
             passengerCount: _passengerCount,
             needReturn: _needReturn,
-            returnTime: _needReturn && _returnTime != null ? _formatTime(_returnTime!) : null,
+            returnTime: _needReturn && _returnTime != null
+                ? _formatTime(_returnTime!)
+                : null,
             note: _noteController.text,
           );
       if (mounted) context.go('/elder');
@@ -94,89 +97,100 @@ class _CreateRideRequestPageState extends ConsumerState<CreateRideRequestPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('新增接送申請')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              DropdownButtonFormField<String>(
-                initialValue: _pickupLocation,
-                decoration: const InputDecoration(labelText: '出發地'),
-                items: AppConstants.pickupLocations
-                    .map((item) => DropdownMenuItem(value: item, child: Text(item)))
-                    .toList(),
-                onChanged: (value) => setState(() => _pickupLocation = value!),
-              ),
-              if (_pickupLocation == '自行輸入') ...[
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _customPickupController,
-                  decoration: const InputDecoration(labelText: '自行輸入出發地'),
-                  validator: (value) => value == null || value.trim().isEmpty ? '請輸入出發地' : null,
+      body: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: _pickupLocation,
+                  decoration: const InputDecoration(labelText: '出發地'),
+                  items: AppConstants.pickupLocations
+                      .map((item) =>
+                          DropdownMenuItem(value: item, child: Text(item)))
+                      .toList(),
+                  onChanged: (value) =>
+                      setState(() => _pickupLocation = value!),
                 ),
-              ],
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _destination,
-                decoration: const InputDecoration(labelText: '目的地'),
-                items: AppConstants.destinations
-                    .map((item) => DropdownMenuItem(value: item, child: Text(item)))
-                    .toList(),
-                onChanged: (value) => setState(() => _destination = value!),
-              ),
-              if (_destination == '自行輸入地點') ...[
+                if (_pickupLocation == '自行輸入') ...[
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _customPickupController,
+                    decoration: const InputDecoration(labelText: '自行輸入出發地'),
+                    validator: (value) =>
+                        value == null || value.trim().isEmpty ? '請輸入出發地' : null,
+                  ),
+                ],
                 const SizedBox(height: 12),
-                TextFormField(
-                  controller: _customDestinationController,
-                  decoration: const InputDecoration(labelText: '自行輸入目的地'),
-                  validator: (value) => value == null || value.trim().isEmpty ? '請輸入目的地' : null,
+                DropdownButtonFormField<String>(
+                  initialValue: _destination,
+                  decoration: const InputDecoration(labelText: '目的地'),
+                  items: AppConstants.destinations
+                      .map((item) =>
+                          DropdownMenuItem(value: item, child: Text(item)))
+                      .toList(),
+                  onChanged: (value) => setState(() => _destination = value!),
                 ),
-              ],
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: _pickDate,
-                child: Text('接送日期：${DateFormat('yyyy/MM/dd').format(_rideDate)}'),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: () => _pickTime(isReturn: false),
-                child: Text('接送時間：${_rideTime.format(context)}'),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<int>(
-                initialValue: _passengerCount,
-                decoration: const InputDecoration(labelText: '人數'),
-                items: List.generate(6, (index) => index + 1)
-                    .map((count) => DropdownMenuItem(value: count, child: Text('$count 人')))
-                    .toList(),
-                onChanged: (value) => setState(() => _passengerCount = value!),
-              ),
-              SwitchListTile(
-                value: _needReturn,
-                onChanged: (value) => setState(() => _needReturn = value),
-                title: const Text('需要回程'),
-              ),
-              if (_needReturn)
+                if (_destination == '自行輸入地點') ...[
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _customDestinationController,
+                    decoration: const InputDecoration(labelText: '自行輸入目的地'),
+                    validator: (value) =>
+                        value == null || value.trim().isEmpty ? '請輸入目的地' : null,
+                  ),
+                ],
+                const SizedBox(height: 12),
                 OutlinedButton(
-                  onPressed: () => _pickTime(isReturn: true),
-                  child: Text(_returnTime == null
-                      ? '選擇回程時間'
-                      : '回程時間：${_returnTime!.format(context)}'),
+                  onPressed: _pickDate,
+                  child: Text(
+                      '接送日期：${DateFormat('yyyy/MM/dd').format(_rideDate)}'),
                 ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _noteController,
-                maxLines: 3,
-                decoration: const InputDecoration(labelText: '備註'),
-              ),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: _saving ? null : _submit,
-                child: Text(_saving ? '送出中...' : '送出申請'),
-              ),
-            ],
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: () => _pickTime(isReturn: false),
+                  child: Text('接送時間：${_rideTime.format(context)}'),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  initialValue: _passengerCount,
+                  decoration: const InputDecoration(labelText: '人數'),
+                  items: List.generate(6, (index) => index + 1)
+                      .map((count) => DropdownMenuItem(
+                          value: count, child: Text('$count 人')))
+                      .toList(),
+                  onChanged: (value) =>
+                      setState(() => _passengerCount = value!),
+                ),
+                SwitchListTile(
+                  value: _needReturn,
+                  onChanged: (value) => setState(() => _needReturn = value),
+                  title: const Text('需要回程'),
+                ),
+                if (_needReturn)
+                  OutlinedButton(
+                    onPressed: () => _pickTime(isReturn: true),
+                    child: Text(_returnTime == null
+                        ? '選擇回程時間'
+                        : '回程時間：${_returnTime!.format(context)}'),
+                  ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _noteController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(labelText: '備註'),
+                ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: _saving ? null : _submit,
+                  child: Text(_saving ? '送出中...' : '送出申請'),
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -136,7 +136,7 @@ class _CreateDriverStandingRideOfferPageState
     return Scaffold(
       appBar: AppBar(title: const Text('刊登長期接送')),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
         children: [
           Form(
             key: _formKey,
@@ -178,9 +178,8 @@ class _CreateDriverStandingRideOfferPageState
                   TextFormField(
                     controller: _customDestinationController,
                     decoration: const InputDecoration(labelText: '自訂目的地'),
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? '請輸入目的地'
-                        : null,
+                    validator: (value) =>
+                        value == null || value.trim().isEmpty ? '請輸入目的地' : null,
                   ),
                 ],
                 const SizedBox(height: 16),

@@ -64,7 +64,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           }
 
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -111,17 +111,20 @@ class _ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = profile.fullName?.trim().isNotEmpty == true ? profile.fullName! : '未命名';
+    final name =
+        profile.fullName?.trim().isNotEmpty == true ? profile.fullName! : '未命名';
     final avatarUrl = profile.avatarUrl?.trim();
 
     return Column(
       children: [
         CircleAvatar(
           radius: 44,
-          backgroundImage:
-              avatarUrl == null || avatarUrl.isEmpty ? null : NetworkImage(avatarUrl),
+          backgroundImage: avatarUrl == null || avatarUrl.isEmpty
+              ? null
+              : NetworkImage(avatarUrl),
           child: avatarUrl == null || avatarUrl.isEmpty
-              ? Text(name.characters.first, style: Theme.of(context).textTheme.headlineMedium)
+              ? Text(name.characters.first,
+                  style: Theme.of(context).textTheme.headlineMedium)
               : null,
         ),
         const SizedBox(height: 12),
@@ -147,7 +150,8 @@ class _InfoCard extends StatelessWidget {
           children: [
             _InfoRow(icon: Icons.email, label: 'Email', value: profile.email),
             const Divider(height: 28),
-            _InfoRow(icon: Icons.phone, label: '電話', value: profile.phone ?? '未填寫'),
+            _InfoRow(
+                icon: Icons.phone, label: '電話', value: profile.phone ?? '未填寫'),
             const Divider(height: 28),
             _InfoRow(icon: Icons.badge, label: '角色', value: profile.roleLabel),
             const Divider(height: 28),

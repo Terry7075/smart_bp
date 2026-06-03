@@ -28,8 +28,8 @@ class ElderHomePage extends ConsumerWidget {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
+      body: SafeArea(
+        top: false,
         child: rides.when(
           data: (items) {
             final active = items
@@ -40,6 +40,7 @@ class ElderHomePage extends ConsumerWidget {
             final current = active.isEmpty ? null : active.first;
 
             return SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [

@@ -17,7 +17,8 @@ class ElderRideDetailPage extends ConsumerStatefulWidget {
   final String rideRequestId;
 
   @override
-  ConsumerState<ElderRideDetailPage> createState() => _ElderRideDetailPageState();
+  ConsumerState<ElderRideDetailPage> createState() =>
+      _ElderRideDetailPageState();
 }
 
 class _ElderRideDetailPageState extends ConsumerState<ElderRideDetailPage> {
@@ -48,8 +49,12 @@ class _ElderRideDetailPageState extends ConsumerState<ElderRideDetailPage> {
           decoration: const InputDecoration(labelText: '取消原因（選填）'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('返回')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('取消行程')),
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('返回')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('取消行程')),
         ],
       ),
     );
@@ -76,7 +81,8 @@ class _ElderRideDetailPageState extends ConsumerState<ElderRideDetailPage> {
                 initialValue: rating,
                 decoration: const InputDecoration(labelText: '評分'),
                 items: List.generate(5, (index) => index + 1)
-                    .map((value) => DropdownMenuItem(value: value, child: Text('$value 分')))
+                    .map((value) =>
+                        DropdownMenuItem(value: value, child: Text('$value 分')))
                     .toList(),
                 onChanged: (value) => setDialogState(() => rating = value ?? 5),
               ),
@@ -87,8 +93,12 @@ class _ElderRideDetailPageState extends ConsumerState<ElderRideDetailPage> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('取消')),
-            FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('送出')),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('送出')),
           ],
         ),
       ),
@@ -114,8 +124,12 @@ class _ElderRideDetailPageState extends ConsumerState<ElderRideDetailPage> {
           decoration: const InputDecoration(labelText: '請描述遇到的問題'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('送出')),
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('送出')),
         ],
       ),
     );
@@ -136,7 +150,8 @@ class _ElderRideDetailPageState extends ConsumerState<ElderRideDetailPage> {
   @override
   Widget build(BuildContext context) {
     final profile = ref.watch(currentProfileProvider).value;
-    final location = ref.watch(driverLocationForRideProvider(widget.rideRequestId));
+    final location =
+        ref.watch(driverLocationForRideProvider(widget.rideRequestId));
     final feedback = ref.watch(feedbackForRideProvider(widget.rideRequestId));
 
     return Scaffold(
@@ -151,16 +166,17 @@ class _ElderRideDetailPageState extends ConsumerState<ElderRideDetailPage> {
           final driver = snapshot.data!.driver;
           if (ride == null) return const Center(child: Text('找不到行程'));
 
-          final canCancel =
-              ride.status == RideStatus.pending || ride.status == RideStatus.matched;
+          final canCancel = ride.status == RideStatus.pending ||
+              ride.status == RideStatus.matched;
           final canRate = ride.status == RideStatus.completed;
 
           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
               children: [
-                Text(ride.status.label, style: Theme.of(context).textTheme.headlineMedium),
+                Text(ride.status.label,
+                    style: Theme.of(context).textTheme.headlineMedium),
                 const SizedBox(height: 16),
                 location.when(
                   data: (item) => Column(
@@ -185,7 +201,9 @@ class _ElderRideDetailPageState extends ConsumerState<ElderRideDetailPage> {
                 _InfoLine(label: '乘客數', value: '${ride.passengerCount}'),
                 _InfoLine(
                   label: '費用',
-                  value: ride.estimatedPrice == null ? '媒合後估算' : '${ride.estimatedPrice} 元',
+                  value: ride.estimatedPrice == null
+                      ? '媒合後估算'
+                      : '${ride.estimatedPrice} 元',
                 ),
                 const SizedBox(height: 16),
                 if (driver == null)
@@ -202,7 +220,8 @@ class _ElderRideDetailPageState extends ConsumerState<ElderRideDetailPage> {
                   runSpacing: 12,
                   children: [
                     OutlinedButton.icon(
-                      onPressed: driver == null ? null : () => _call(driver.phone),
+                      onPressed:
+                          driver == null ? null : () => _call(driver.phone),
                       icon: const Icon(Icons.phone),
                       label: const Text('撥打司機'),
                     ),
@@ -249,14 +268,18 @@ class _ElderRideDetailPageState extends ConsumerState<ElderRideDetailPage> {
                       : Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('回饋紀錄', style: Theme.of(context).textTheme.titleMedium),
+                            Text('回饋紀錄',
+                                style: Theme.of(context).textTheme.titleMedium),
                             ...items.map((item) => ListTile(
                                   contentPadding: EdgeInsets.zero,
-                                  leading: Icon(item.isIssue ? Icons.report : Icons.star),
+                                  leading: Icon(
+                                      item.isIssue ? Icons.report : Icons.star),
                                   title: Text(item.isIssue
                                       ? item.issueType ?? '問題回報'
                                       : '${item.rating} 分'),
-                                  subtitle: Text(item.issueDescription ?? item.comment ?? ''),
+                                  subtitle: Text(item.issueDescription ??
+                                      item.comment ??
+                                      ''),
                                 )),
                           ],
                         ),
@@ -274,7 +297,8 @@ class _ElderRideDetailPageState extends ConsumerState<ElderRideDetailPage> {
   Future<_RideDetailData> _loadRideDetail(RideService service) async {
     final ride = await service.fetchRideRequestById(widget.rideRequestId);
     final match = await service.fetchMatchForRideRequest(widget.rideRequestId);
-    final driver = match == null ? null : await service.fetchDriverById(match.driverId);
+    final driver =
+        match == null ? null : await service.fetchDriverById(match.driverId);
     return _RideDetailData(ride: ride, match: match, driver: driver);
   }
 }
@@ -295,7 +319,8 @@ class _InfoLine extends StatelessWidget {
 }
 
 class _RideDetailData {
-  const _RideDetailData({required this.ride, required this.match, required this.driver});
+  const _RideDetailData(
+      {required this.ride, required this.match, required this.driver});
 
   final RideRequest? ride;
   final RideMatch? match;
