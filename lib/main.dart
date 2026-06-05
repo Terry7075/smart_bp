@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // 👈 1. 引入 Supabase 套件
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/notification_service.dart';
+import 'core/shop_push_service.dart';
 import 'core/router.dart';
+import 'features/shared/offline_queue/offline_queue.dart';
 
 // 👈 2. main 函式必須加上 async，因為連線到雲端需要等待
 void main() async { 
@@ -16,9 +18,12 @@ void main() async {
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50dWZod3F4YWlkd25lbG9yY3N2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyMTc3NDIsImV4cCI6MjA5MDc5Mzc0Mn0.huSbIe7lqoUY-KTNgBl6ahMy8Px-6CS7s28gkQeJTaI',      // ⚠️ 注意：這裡要換成你 Supabase 後台的 anon key
   );
 
-  // 👈 4. 初始化本機通知服務（載入時區資料、註冊 channel）
-  // 不阻擋啟動：即使初始化失敗，App 主流程仍可運作。
+  // 初始化本機通知服務
   await NotificationService.instance.init();
+  await ShopPushService.instance.init();
+
+  // 初始化 Hive 離線佇列（網路恢復時 flush 同步 demand 草稿）
+  await OfflineQueue.init();
 
   runApp(
     // ProviderScope 是 Riverpod 的核心，它負責存放應用程式所有的「狀態」

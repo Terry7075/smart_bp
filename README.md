@@ -1,17 +1,30 @@
-# smart_bp
+# 明德 e 達人（smart_bp）
 
-A new Flutter project.
+Flutter + Supabase 社區長輩整合平台（用藥、檔案、物資代購、交通等）。
 
-## Getting Started
+## 個人負責（第五章：物資代購 + 智慧小幫手）
 
-This project is a starting point for a Flutter application.
+完整說明、**功能完成度**、未完成清單、Demo 路徑：
 
-A few resources to get you started if this is your first Flutter project:
+**[docs/SHOP_ASSISTANT_README.md](docs/SHOP_ASSISTANT_README.md)**
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+新電腦建置（Firebase、SQL 順序、測試帳號）：**[docs/TEAM_SETUP.md](docs/TEAM_SETUP.md)**
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+| 快速指令 | |
+|----------|--|
+| 安裝 | `flutter pub get` |
+| Web Demo | `flutter run -d chrome --web-port=8080` |
+| 意圖測試 | `flutter test test/assistant_shop_intent_test.dart` |
+| Git 分支 | `features-shop` |
+| 遠端 | https://github.com/Terry7075/smart_bp |
+
+## 其他組員模組（簡述）
+
+- 登入／角色：`lib/features/auth/`
+- 健康 OCR／藥單：其他組員
+- 志工藥單主控：`lib/features/volunteer/volunteer_dashboard.dart`
+- 首頁交通／學習等：部分仍為占位（見開發總覽）
+
+## Supabase
+
+連線見 `lib/main.dart`。SQL 執行順序見 [docs/SHOP_ASSISTANT_README.md §5](docs/SHOP_ASSISTANT_README.md#5-supabase-sql-執行順序新電腦必做)。

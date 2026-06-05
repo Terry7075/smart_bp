@@ -13,6 +13,7 @@ import 'package:smart_bp/features/volunteer/volunteer_batch_refill_provider.dart
 import 'package:smart_bp/features/volunteer/volunteer_batch_refill_tab.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task_provider.dart';
+import 'package:smart_bp/features/volunteer/widgets/volunteer_hub_analytics_tab.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -30,7 +31,10 @@ enum _VolunteerSection { health, shop, learning, activities }
 
 /// 志工任務儀表板（健康／商城／學習／活動）。
 class VolunteerDashboard extends ConsumerStatefulWidget {
-  const VolunteerDashboard({super.key});
+  const VolunteerDashboard({super.key, this.initialTab = 0});
+
+  /// 0=藥單 1=批次代領 2=監測 3=數據總覽
+  final int initialTab;
 
   @override
   ConsumerState<VolunteerDashboard> createState() => _VolunteerDashboardState();
@@ -109,7 +113,10 @@ class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard> {
   Widget _buildSectionBody() {
     return switch (_section) {
       _VolunteerSection.health =>
-        _VolunteerHealthSection(onRefreshAll: _refreshHealth),
+        _VolunteerHealthSection(
+          onRefreshAll: _refreshHealth,
+          initialTab: widget.initialTab,
+        ),
       _VolunteerSection.shop => const ShopPage(embedded: true),
       _VolunteerSection.learning =>
         const VolunteerContentManagePage(embedded: true),
@@ -209,9 +216,15 @@ class _SectionNavButton extends StatelessWidget {
 
 /// 健康分區：藥單協助、批次代領、長者監測。
 class _VolunteerHealthSection extends ConsumerStatefulWidget {
-  const _VolunteerHealthSection({required this.onRefreshAll});
+  const _VolunteerHealthSection({
+    required this.onRefreshAll,
+    this.initialTab = 0,
+  });
 
   final Future<void> Function() onRefreshAll;
+
+  /// 0=藥單 1=批次代領 2=監測 3=數據總覽
+  final int initialTab;
 
   @override
   ConsumerState<_VolunteerHealthSection> createState() =>
@@ -225,7 +238,8 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    final tab = widget.initialTab.clamp(0, 3);
+    _tabController = TabController(length: 4, vsync: this, initialIndex: tab);
   }
 
   @override
@@ -261,6 +275,7 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
               Tab(text: '藥單協助'),
               Tab(text: '🛵 批次代領'),
               Tab(text: '❤️ 長者監測'),
+              Tab(text: '📊 數據總覽'),
             ],
           ),
         ),
@@ -289,6 +304,7 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
                 child: const VolunteerBatchRefillTab(),
               ),
               const VolunteerMonitoringTab(),
+              const VolunteerHubAnalyticsTab(),
             ],
           ),
         ),

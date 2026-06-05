@@ -67,3 +67,42 @@ with check (
 -- 建議屆時新增 profiles.role（elder/volunteer/admin）或建立 volunteers mapping 表，
 -- 再加對應的 select policy（例如 volunteer 可看自己負責里別的 user_id）。
 
+-- 4) Demo：角色為 volunteer 的帳號可讀取「所有」orders / order_items（僅展示用）
+--    上線請改為里別／負責名單範圍。
+--    需 `profiles.role = 'volunteer'`（與 App 端 [UserRole.volunteer] 一致）。
+drop policy if exists "orders_select_volunteer" on public.orders;
+create policy "orders_select_volunteer"
+on public.orders for select
+using (
+  exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role::text = 'volunteer'
+  )
+);
+
+drop policy if exists "order_items_select_volunteer" on public.order_items;
+create policy "order_items_select_volunteer"
+on public.order_items for select
+using (
+  exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role::text = 'volunteer'
+  )
+);
+
+-- 5) （選用）Demo：志工可讀他人 profiles 的 id/name，讓列表顯示「長輩姓名」
+--    若你的 profiles 尚未啟用 RLS，請勿執行；若已啟用且沒有 policy，長輩自己也可能讀不到——
+--    請先確認現有 policies 再追加下列其中一種：
+--
+-- alter table public.profiles enable row level security;
+-- drop policy if exists "profiles_select_self" on public.profiles;
+-- create policy "profiles_select_self" on public.profiles for select using (auth.uid() = id);
+-- drop policy if exists "profiles_select_volunteer_demo" on public.profiles;
+-- create policy "profiles_select_volunteer_demo" on public.profiles for select
+-- using (
+--   exists (
+--     select 1 from public.profiles p
+--     where p.id = auth.uid() and p.role::text = 'volunteer'
+--   )
+-- );
+
