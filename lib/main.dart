@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/notification_service.dart';
+import 'core/shop_push_service.dart';
 import 'core/router.dart';
 import 'features/shared/offline_queue/offline_queue.dart';
 
@@ -19,8 +20,9 @@ void main() async {
 
   // 初始化本機通知服務
   await NotificationService.instance.init();
+  await ShopPushService.instance.init();
 
-  // 初始化 Hive 離線佇列（網路恢復時自動 flush）
+  // 初始化 Hive 離線佇列（網路恢復時 flush 同步 demand 草稿）
   await OfflineQueue.init();
 
   runApp(

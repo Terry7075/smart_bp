@@ -1,3 +1,7 @@
+import 'package:flutter/foundation.dart';
+import 'package:smart_bp/core/shop_push_invoker.dart';
+import 'package:smart_bp/features/shared/offline_queue/offline_queue.dart';
+import 'package:smart_bp/features/shop/domain/fulfillment_status.dart';
 import 'package:smart_bp/features/shop/domain/supply_line_snapshot.dart';
 import 'package:smart_bp/features/shop/data/shop_orders_repository.dart';
 
@@ -18,6 +22,7 @@ final class DemandRecordItem {
     this.supplyCategoryKey,
     this.templateOptionId,
     this.referenceNote,
+    this.fulfillmentStatus,
   });
 
   final String id;
@@ -33,6 +38,24 @@ final class DemandRecordItem {
   final String? supplyCategoryKey;
   final String? templateOptionId;
   final String? referenceNote;
+  final ItemFulfillmentStatus? fulfillmentStatus;
+}
+
+/// 長輩訂單詳情：對應 demand_record_items 的履行狀態。
+final class DemandItemFulfillmentRow {
+  const DemandItemFulfillmentRow({
+    required this.productName,
+    required this.quantity,
+    required this.fulfillmentStatus,
+    this.brand,
+    this.spec,
+  });
+
+  final String productName;
+  final int quantity;
+  final ItemFulfillmentStatus fulfillmentStatus;
+  final String? brand;
+  final String? spec;
 }
 
 final class DemandRecord {
@@ -144,6 +167,33 @@ final class DemandRecordsRepository {
     return (await _loadRecordById(draft.id))!;
   }
 
+  /// 寫入結構化品項；失敗時進離線佇列（與小幫手／語音路徑一致）。
+  Future<DemandRecord> addSnapshotLinesResilient({
+    required String userId,
+    required List<SupplyLineSnapshot> lines,
+  }) async {
+    try {
+      return await addSnapshotLines(userId: userId, lines: lines);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[DemandRecords] addSnapshotLines failed, enqueue: $e');
+      }
+      for (final line in lines) {
+        await OfflineQueue.instance.enqueue(
+          userId: userId,
+          productName: line.productName,
+          quantity: line.quantity,
+          productId: line.productId,
+          unitPrice: line.unitPrice,
+        );
+      }
+      final draft = await getOrCreateDraft(userId: userId);
+      if (draft == null) {
+        throw const AuthException('無法建立需求草稿');
+      }
+      return draft;
+    }
+  }
 
   Future<DemandRecord?> cancelProduct({
     required String userId,
@@ -202,13 +252,77 @@ final class DemandRecordsRepository {
       ],
     );
 
+    final now = DateTime.now().toUtc().toIso8601String();
     await _client.from('demand_records').update({
       'status': 'submitted',
       'order_id': orderId,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
+      'submitted_at': now,
+      'updated_at': now,
     }).eq('id', draft.id);
 
+    final elderLabel = await _elderDisplayName(userId);
+    final summary = active
+        .map((i) {
+          final brand = (i.brand ?? '').trim();
+          final name = i.productName;
+          return brand.isNotEmpty ? '$name（$brand）×${i.quantity}' : '$name×${i.quantity}';
+        })
+        .join('、');
+    await ShopPushInvoker.instance.notifyVolunteers(
+      eventType: 'demand_submitted',
+      elderUserId: userId,
+      title: '新的代購需求',
+      bodyText: '$elderLabel 已送出代購需求：$summary。請協助代購',
+      payload: {
+        'order_id': orderId,
+        'demand_record_id': draft.id,
+        'elder_display': elderLabel,
+      },
+    );
+
     return orderId;
+  }
+
+  /// 依正式訂單 id 讀取品項履行狀態（長輩訂單詳情用）。
+  Future<List<DemandItemFulfillmentRow>> fetchItemFulfillmentForOrder(
+    String orderId,
+  ) async {
+    try {
+      final raw = await _client
+          .from('demand_records')
+          .select(
+            'demand_record_items(product_name, quantity, brand, spec, '
+            'fulfillment_status, cancelled)',
+          )
+          .eq('order_id', orderId)
+          .limit(1)
+          .maybeSingle();
+      if (raw == null) return const [];
+      final items = raw['demand_record_items'];
+      if (items is! List) return const [];
+      final out = <DemandItemFulfillmentRow>[];
+      for (final e in items) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        if (m['cancelled'] == true) continue;
+        final status = ItemFulfillmentStatus.fromValue(
+              m['fulfillment_status']?.toString(),
+            ) ??
+            ItemFulfillmentStatus.pending;
+        out.add(
+          DemandItemFulfillmentRow(
+            productName: m['product_name']?.toString() ?? '',
+            quantity: (m['quantity'] as num?)?.toInt() ?? 1,
+            fulfillmentStatus: status,
+            brand: m['brand']?.toString(),
+            spec: m['spec']?.toString(),
+          ),
+        );
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
   }
 
   Future<String?> fetchElderLocationPointId(String userId) async {
@@ -231,9 +345,9 @@ final class DemandRecordsRepository {
         .select(
           'id, user_id, status, location_point_id, order_id, updated_at, '
           'location_points(name), '
-          'demand_record_items(id, product_id, product_name, quantity, unit_price, cancelled, brand, spec, unit_label, category, supply_category_key, template_option_id, reference_note)',
+          'demand_record_items(id, product_id, product_name, quantity, unit_price, cancelled, brand, spec, unit_label, category, supply_category_key, template_option_id, reference_note, fulfillment_status)',
         )
-        .inFilter('status', ['draft', 'submitted'])
+        .eq('status', 'draft')
         .order('updated_at', ascending: false)
         .limit(limit);
 
@@ -253,7 +367,7 @@ final class DemandRecordsRepository {
         .select(
           'id, user_id, status, location_point_id, order_id, updated_at, '
           'location_points(name), '
-          'demand_record_items(id, product_id, product_name, quantity, unit_price, cancelled, brand, spec, unit_label, category, supply_category_key, template_option_id, reference_note)',
+          'demand_record_items(id, product_id, product_name, quantity, unit_price, cancelled, brand, spec, unit_label, category, supply_category_key, template_option_id, reference_note, fulfillment_status)',
         )
         .eq('id', id)
         .maybeSingle();
@@ -295,6 +409,9 @@ final class DemandRecordsRepository {
             supplyCategoryKey: m['supply_category_key']?.toString(),
             templateOptionId: m['template_option_id']?.toString(),
             referenceNote: m['reference_note']?.toString(),
+            fulfillmentStatus: ItemFulfillmentStatus.fromValue(
+              m['fulfillment_status']?.toString(),
+            ),
           ),
         );
       }
@@ -311,5 +428,18 @@ final class DemandRecordsRepository {
       updatedAt: DateTime.tryParse(row['updated_at']?.toString() ?? '') ??
           DateTime.now(),
     );
+  }
+
+  Future<String> _elderDisplayName(String userId) async {
+    try {
+      final row = await _client
+          .from('profiles')
+          .select('name')
+          .eq('id', userId)
+          .maybeSingle();
+      final name = row?['name']?.toString().trim();
+      if (name != null && name.isNotEmpty) return '$name 長輩';
+    } catch (_) {}
+    return '長輩';
   }
 }

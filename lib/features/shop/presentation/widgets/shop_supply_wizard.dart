@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/shop/data/elder_supply_templates.dart';
 import 'package:smart_bp/features/assistant/data/assistant_shop_action_service.dart';
+import 'package:smart_bp/features/shop/presentation/shop_draft_providers.dart';
 import 'package:smart_bp/features/shop/data/supply_dialogue_service.dart';
 import 'package:smart_bp/features/shop/domain/pending_supply_dialogue.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/brand_choice_list.dart';
@@ -35,7 +36,7 @@ class _ShopSupplyWizardState extends ConsumerState<ShopSupplyWizard> {
             ),
             const SizedBox(height: 8),
             const Text(
-              '選類別 → 品牌 → 數量，完成後按下方「送出需求」',
+              '選類別 → 品牌 → 數量，加入後請按上方「送出給志工」',
               style: TextStyle(fontSize: 16),
             ),
             const SizedBox(height: 12),
@@ -75,7 +76,7 @@ class _ShopSupplyWizardState extends ConsumerState<ShopSupplyWizard> {
       unitLabel: cat.defaultUnitLabel,
       categoryImageUrl: cat.categoryImageUrl,
     );
-    final ask = const SupplyDialogueService().brandAskReplyFor(pending);
+    final ask = SupplyDialogueService().brandAskReplyFor(pending);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -86,8 +87,12 @@ class _ShopSupplyWizardState extends ConsumerState<ShopSupplyWizard> {
         const SizedBox(height: 8),
         BrandChoiceList(
           choices: ask.brandChoices,
-          onTapChoice: (c) {
+            onTapChoice: (c) {
             final opt = cat.options.firstWhere((o) => o.id == c.optionId);
+            if (opt.isOther) {
+              setState(() => _option = opt);
+              return;
+            }
             setState(() => _option = opt);
           },
         ),
@@ -148,6 +153,7 @@ class _ShopSupplyWizardState extends ConsumerState<ShopSupplyWizard> {
             userId: uid,
             lines: [snap],
           );
+      ref.invalidate(elderDemandDraftProvider);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('已加入：${snap.productName} × $_qty')),

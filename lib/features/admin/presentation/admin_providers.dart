@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_bp/features/assistant/data/assistant_shop_action_service.dart';
+import 'package:smart_bp/features/profile/profile_provider.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_provider.dart';
 
@@ -92,8 +93,18 @@ final class AdminOrderStats {
   final int draftDemandCount;
 }
 
+/// 據點管理者／志工共用：優先志工可見範圍，admin 帳號則拉全站。
 final adminOrdersProvider = FutureProvider<List<ShopOrderListRow>>((ref) async {
-  return ref.read(shopOrdersRepositoryProvider).listOrdersForAdmin(limit: 200);
+  final repo = ref.read(shopOrdersRepositoryProvider);
+  final profile = await ref.watch(profileProvider.future);
+  if (profile?.isAdmin == true) {
+    try {
+      return await repo.listOrdersForAdmin(limit: 200);
+    } catch (_) {
+      // admin RLS 未開時降級
+    }
+  }
+  return repo.listOrdersWithItemsForVolunteer(limit: 200);
 });
 
 final adminStatsProvider = FutureProvider<AdminOrderStats>((ref) async {

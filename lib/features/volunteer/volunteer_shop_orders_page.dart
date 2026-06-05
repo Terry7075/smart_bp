@@ -14,6 +14,8 @@ import 'package:smart_bp/shared/debug/realtime_latency_banner.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:smart_bp/features/shop/data/px_mart_links.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/shopping_line_tile.dart';
+import 'package:smart_bp/features/volunteer/widgets/volunteer_daily_shopping_list_panel.dart';
+import 'package:smart_bp/features/volunteer/widgets/volunteer_purchase_batch_panel.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 
@@ -146,7 +148,7 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
           backgroundColor: VolunteerShopOrdersPage._volunteerBlue,
           foregroundColor: Colors.white,
           title: const Text(
-            '物資／柑仔店需求',
+            '物資／今日採買',
             style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
           ),
           centerTitle: true,
@@ -194,6 +196,11 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   children: [
                     _buildHeader(context),
+                    const VolunteerDailyShoppingListPanel(),
+                    const SizedBox(height: 12),
+                    // 批次／路線為 v2 進階模組，v3 主流程不展示
+                    if (kDebugMode) const VolunteerPurchaseBatchPanel(),
+                    const SizedBox(height: 12),
                     drafts.when(
                       data: (list) {
                         if (list.isEmpty) return const SizedBox.shrink();

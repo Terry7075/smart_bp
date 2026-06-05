@@ -52,6 +52,9 @@ class Profile {
 
   bool get isAdmin => role == kRoleAdmin;
 
+  /// 志工端入口：含原 admin（據點管理者併入志工 UI）。
+  bool get isVolunteerHub => isVolunteer || isAdmin;
+
   /// 不可變更新，方便編輯頁先做樂觀更新。
   Profile copyWith({String? name, String? phone, String? role}) => Profile(
         id: id,

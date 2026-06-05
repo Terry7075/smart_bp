@@ -112,7 +112,10 @@ GoRouter get appRouter =>
         ),
         GoRoute(
           path: '/volunteer-dashboard',
-          builder: (context, state) => const VolunteerDashboard(),
+          builder: (context, state) {
+            final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
+            return VolunteerDashboard(initialTab: tab.clamp(0, 3));
+          },
         ),
         GoRoute(
           path: '/shop',
@@ -225,7 +228,7 @@ class _RoleDecisionPageState extends ConsumerState<_RoleDecisionPage> {
     final target = switch (profile.role) {
       Profile.kRoleVolunteer => '/volunteer-dashboard',
       Profile.kRoleFamily => '/family/home',
-      Profile.kRoleAdmin => '/admin/dashboard',
+      Profile.kRoleAdmin => '/volunteer-dashboard?tab=3',
       _ => '/home',
     };
 

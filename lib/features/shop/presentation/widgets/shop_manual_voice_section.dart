@@ -87,7 +87,7 @@ class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection>
                 .toList(),
           );
     } catch (e) {
-      // 網路或 DB 失敗 → 寫入離線佇列，網路恢復後自動重送
+      // 網路或 DB 失敗 → 寫入離線佇列，恢復後 flush 僅同步草稿
       if (kDebugMode) debugPrint('[ShopVoice] Supabase failed, enqueuing: $e');
       for (final p in items) {
         await OfflineQueue.instance.enqueue(
@@ -103,7 +103,7 @@ class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection>
             backgroundColor: Color(0xFFE65100),
             duration: Duration(seconds: 5),
             content: Text(
-              '目前無法連線，已離線暫存，網路恢復後自動送出',
+              '目前無法連線，已離線暫存。連線恢復後會寫入草稿，請再到柑仔店按「送出給志工」',
               style: TextStyle(fontSize: 17),
             ),
           ),
@@ -201,7 +201,7 @@ class _ShopManualVoiceSectionState extends ConsumerState<ShopManualVoiceSection>
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      '有 $count 筆需求尚未送出\n網路恢復後會自動送給志工',
+                      '有 $count 筆需求尚未同步\n連線恢復後會寫入草稿，請按「送出給志工」',
                       style: const TextStyle(
                         fontSize: 17,
                         height: 1.4,

@@ -66,7 +66,7 @@ class OfflineDemandItem {
 
 /// Hive 離線佇列：
 /// - 網路或 Supabase 寫入失敗時 [enqueue]。
-/// - App 啟動或網路恢復時 [flush]。
+/// - App 啟動或網路恢復時 [flush] 僅寫入 `demand_records` 草稿（不自動送單／推播）。
 /// - 使用 `client_request_id` 保證冪等（DB unique index 存在時）。
 class OfflineQueue {
   static const _boxName = 'offline_demand_queue';

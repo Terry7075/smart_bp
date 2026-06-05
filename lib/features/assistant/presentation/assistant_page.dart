@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:smart_bp/features/assistant/data/assistant_hints.dart';
 import 'package:smart_bp/features/assistant/data/assistant_navigation.dart';
+import 'package:smart_bp/features/assistant/data/assistant_shop_navigation.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_message.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_history_sidebar.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_history_provider.dart';
@@ -321,6 +322,49 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
                       },
                     ),
                   ),
+                  if (!chat.viewingHistory && chat.pendingSupply != null)
+                    Material(
+                      color: const Color(0xFFE8F5E9),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.touch_app,
+                              color: Color(0xFF2E7D32),
+                              size: 26,
+                            ),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                '正在確認品牌：選完後請到柑仔店送出',
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            FilledButton(
+                              onPressed: () => assistantNavigate(
+                                context,
+                                ref,
+                                AssistantShopNavigation.submit,
+                              ),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF2E7D32),
+                              ),
+                              child: const Text(
+                                '柑仔店送出',
+                                style: TextStyle(fontSize: 16),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   if (!chat.viewingHistory && voice.isListening)
                     AssistantVoiceLivePanel(
                       onConfirm: _confirmVoice,
@@ -675,6 +719,27 @@ class _MessageBubble extends ConsumerWidget {
                           }
                         : null,
                   ),
+                  if (actionsEnabled) ...[
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        assistantNavigate(
+                          context,
+                          ref,
+                          AssistantShopNavigation.submit,
+                        );
+                        onNavigate?.call();
+                      },
+                      icon: const Icon(Icons.storefront, size: 22),
+                      label: const Text(
+                        '選好品牌後，前往柑仔店送出',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
                 if (message.intentLabel != null &&
                     message.intentLabel!.trim().isNotEmpty) ...[

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io' show Platform;
 
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -30,6 +31,9 @@ const String kPayloadMinduCheckinPrefix = 'mindu_checkin|';
 
 /// 健康告警通知 payload（**舊**格式前綴）：`health_alert|<elderId>`
 const String kPayloadHealthAlertPrefix = 'health_alert|';
+
+/// 柑仔店／志工 FCM 點擊導航：`mindu_shop|<route>`
+const String kPayloadMinduShopPrefix = 'mindu_shop|';
 
 /// payload JSON 的 type 值。
 const String _kTypeCheckin = 'mindu_checkin';
@@ -123,10 +127,22 @@ class NotificationService {
     if (payload.startsWith('mindu_order|')) {
       final orderId = payload.substring('mindu_order|'.length);
       if (orderId.isNotEmpty) {
-        _navigate?.call('/shop/orders/$orderId');
+        _go('/shop/orders/$orderId');
+      }
+      return;
+    }
+
+    // 柑仔店 FCM／本機推播：跳轉志工採買或自訂路由。
+    if (payload.startsWith(kPayloadMinduShopPrefix)) {
+      final route = payload.substring(kPayloadMinduShopPrefix.length);
+      if (route.isNotEmpty) {
+        _go(route);
       }
     }
   }
+
+  /// 由 FCM 點擊或前景 handler 導航（[bindNavigate] 前會暫存）。
+  void navigateToRoute(String route) => _go(route);
 
   void _goCheckin(String rxId, String slotTime) {
     final encRx = Uri.encodeComponent(rxId);
@@ -278,13 +294,73 @@ class NotificationService {
     return granted ?? false;
   }
 
+  /// 將 FCM [RemoteMessage] 轉成本機高優先通知（前景／背景 data-only 用）。
+  Future<void> showShopPushFromRemoteMessage(RemoteMessage message) async {
+    final n = message.notification;
+    final data = message.data;
+    final title = n?.title ?? data['title'] ?? '明德 e 達人';
+    final body = n?.body ?? data['body_text'] ?? data['body'] ?? '您有新的代購通知';
+    final route = data['route'] ?? '/volunteer/shop-orders';
+    final orderId = data['order_id'];
+    final idSeed = orderId ?? message.messageId ?? route;
+    await showShopPushNotification(
+      title: title,
+      body: body,
+      route: route,
+      notificationId: 320000 + (idSeed.hashCode.abs() % 80000),
+    );
+  }
+
+  /// 柑仔店／志工推播（FCM 前景或 Realtime 補強）。
+  Future<void> showShopPushNotification({
+    required String title,
+    required String body,
+    String route = '/volunteer/shop-orders',
+    int notificationId = 320001,
+  }) async {
+    if (!_initialized) await init();
+    if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) return;
+
+    final details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        _orderChannelId,
+        _orderChannelName,
+        channelDescription: _orderChannelDesc,
+        importance: Importance.high,
+        priority: Priority.high,
+        playSound: true,
+        enableVibration: true,
+      ),
+      iOS: const DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      ),
+    );
+
+    final payload = '$kPayloadMinduShopPrefix$route';
+    try {
+      await _plugin.show(
+        id: notificationId,
+        title: title,
+        body: body,
+        notificationDetails: details,
+        payload: payload,
+      );
+    } catch (e) {
+      debugPrint('[NotificationService] showShopPushNotification failed: $e');
+    }
+  }
+
   /// 即時顯示訂單狀態通知（不排程，立即出現）。
   ///
   /// [orderId] 可作為 payload，點擊後跳轉 `/shop/orders/:id`。
+  /// [route] 若設定則使用 `mindu_shop|<route>`（志工採買清單等）。
   Future<void> showOrderStatusNotification({
     required String title,
     required String body,
     String? orderId,
+    String? route,
     int notificationId = 1,
   }) async {
     if (!_initialized) await init();
@@ -307,7 +383,14 @@ class NotificationService {
       ),
     );
 
-    final payload = orderId != null ? 'mindu_order|$orderId' : null;
+    final String? payload;
+    if (route != null && route.isNotEmpty) {
+      payload = '$kPayloadMinduShopPrefix$route';
+    } else if (orderId != null) {
+      payload = 'mindu_order|$orderId';
+    } else {
+      payload = null;
+    }
     try {
       await _plugin.show(
         id: notificationId,

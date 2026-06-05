@@ -92,7 +92,8 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
                 child: const Padding(
                   padding: EdgeInsets.all(14),
                   child: Text(
-                    '綁定家中長輩後，可查看柑仔店代購進度，減少電話追問。',
+                    '家屬為獨立帳號（profiles.role = family），需綁定長輩 UUID 後查看代購進度。\n'
+                    '若 Demo 未準備家屬帳號，可改由長輩本人開啟柑仔店 →「我的需求單」。',
                     style: TextStyle(fontSize: 17, height: 1.4),
                   ),
                 ),
@@ -155,16 +156,22 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
 // 家屬長輩綁定卡片：訂單清單 + inline compact 時間軸
 // ─────────────────────────────────────────────────────────────
 
-class _ElderLinkCard extends ConsumerWidget {
+class _ElderLinkCard extends ConsumerStatefulWidget {
   const _ElderLinkCard({required this.link});
 
   final FamilyElderLink link;
 
+  @override
+  ConsumerState<_ElderLinkCard> createState() => _ElderLinkCardState();
+}
+
+class _ElderLinkCardState extends ConsumerState<_ElderLinkCard> {
   static const Color _purple = Color(0xFF6A1B9A);
+  bool _showAllOrders = false;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final orders = ref.watch(familyElderOrdersProvider(link.elderUserId));
+  Widget build(BuildContext context) {
+    final orders = ref.watch(familyElderOrdersProvider(widget.link.elderUserId));
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -189,17 +196,18 @@ class _ElderLinkCard extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        link.elderName ?? '長輩',
+                        widget.link.elderName ?? '長輩',
                         style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                       ),
-                      Text('我的${link.relation}', style: TextStyle(fontSize: 15, color: Colors.grey.shade700)),
+                      Text('我的${widget.link.relation}', style: TextStyle(fontSize: 15, color: Colors.grey.shade700)),
                     ],
                   ),
                 ),
                 IconButton(
                   tooltip: '重新整理',
                   icon: const Icon(Icons.refresh),
-                  onPressed: () => ref.invalidate(familyElderOrdersProvider(link.elderUserId)),
+                  onPressed: () =>
+                      ref.invalidate(familyElderOrdersProvider(widget.link.elderUserId)),
                 ),
               ],
             ),
@@ -218,21 +226,22 @@ class _ElderLinkCard extends ConsumerWidget {
                     child: Text('尚無代購需求單', style: TextStyle(fontSize: 17)),
                   );
                 }
-                // 最多顯示 5 筆
-                final recent = list.take(5).toList();
+                final visible = _showAllOrders ? list : list.take(5).toList();
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (final order in recent) ...[
+                    for (final order in visible) ...[
                       _FamilyOrderCard(order: order),
                       const SizedBox(height: 8),
                     ],
                     if (list.length > 5)
                       Center(
                         child: TextButton.icon(
-                          onPressed: () => context.push('/shop/orders'),
-                          icon: const Icon(Icons.list_alt),
-                          label: Text('查看全部 ${list.length} 筆'),
+                          onPressed: () => setState(() => _showAllOrders = !_showAllOrders),
+                          icon: Icon(_showAllOrders ? Icons.expand_less : Icons.list_alt),
+                          label: Text(
+                            _showAllOrders ? '收合列表' : '查看全部 ${list.length} 筆',
+                          ),
                         ),
                       ),
                   ],

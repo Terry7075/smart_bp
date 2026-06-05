@@ -15,7 +15,8 @@ import 'package:smart_bp/features/shop/presentation/shop_orders_realtime_provide
 import 'package:smart_bp/features/shop/data/px_mart_links.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/shop_supply_wizard.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/shop_manual_voice_section.dart';
-import 'package:smart_bp/features/shop/presentation/widgets/shop_voice_demand_bar.dart';
+import 'package:smart_bp/features/shop/presentation/widgets/shop_personalized_recommendations.dart';
+import 'package:smart_bp/features/shop/presentation/widgets/shop_primary_demand_section.dart';
 import 'package:smart_bp/shared/widgets/mindu_loading_overlay.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -61,20 +62,6 @@ class ShopPage extends ConsumerWidget {
           style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
         ),
         actions: [
-          // 最常用功能：語音需求（直接露出）
-          TextButton.icon(
-            style: TextButton.styleFrom(
-              foregroundColor: colorScheme.onPrimary,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            ),
-            icon: const Icon(Icons.mic, size: 26),
-            label: const Text(
-              '語音需求',
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-            ),
-            onPressed: () => context.push('/shop/demand-input'),
-          ),
-          // 其餘功能收納進 PopupMenuButton，解決 iPhone SE 溢出問題
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: colorScheme.onPrimary, size: 28),
             onSelected: (value) {
@@ -124,11 +111,16 @@ class ShopPage extends ConsumerWidget {
             child: Text('載入商品資料失敗\n$e', textAlign: TextAlign.center),
           ),
         ),
-        data: (products) => _ShopOrderView(
-          products: products,
-          colorScheme: colorScheme,
-          accent: _accentBrown,
-        ),
+        data: (products) {
+          final focusSubmit =
+              GoRouterState.of(context).uri.queryParameters['focus'] == 'submit';
+          return _ShopOrderView(
+            products: products,
+            colorScheme: colorScheme,
+            accent: _accentBrown,
+            highlightSubmit: focusSubmit,
+          );
+        },
       ),
     );
   }
@@ -139,11 +131,13 @@ class _ShopOrderView extends ConsumerStatefulWidget {
     required this.products,
     required this.colorScheme,
     required this.accent,
+    this.highlightSubmit = false,
   });
 
   final List<ShopProduct> products;
   final ColorScheme colorScheme;
   final Color accent;
+  final bool highlightSubmit;
 
   @override
   ConsumerState<_ShopOrderView> createState() => _ShopOrderViewState();
@@ -236,6 +230,31 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先選擇至少一項商品數量')));
       return;
     }
+
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('目錄直送確認'),
+        content: const Text(
+          '這是目錄快捷送出，不經上方語音品牌確認，\n'
+          '也不會走今日採買完整履行鏈。\n\n'
+          '口試 Demo 建議用上方「語音 → 品牌 → 送出給志工」。\n\n'
+          '仍要用目錄送出嗎？',
+          style: TextStyle(fontSize: 16, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('改用語音流程'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('仍要送出'),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !mounted) return;
 
     final session = ref.read(authProvider);
     final user = session?.user;
@@ -333,33 +352,29 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
             child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
+              ShopPrimaryDemandSection(highlightSubmit: widget.highlightSubmit),
+              const SizedBox(height: 16),
               const ShopSupplyWizard(),
+              const SizedBox(height: 8),
+              ShopPersonalizedRecommendations(
+                onAdded: () => setState(() {}),
+              ),
+              const SizedBox(height: 8),
               Card(
-                color: widget.colorScheme.primaryContainer.withValues(alpha: 0.35),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.info_outline, color: widget.colorScheme.primary, size: 26),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          '說出或輸入想買的品項即可（可語音＋字幕），系統會幫您對應全聯搜尋並通知志工。送出訂單後，志工於「物資／柑仔店代購」即可查看。',
-                          style: TextStyle(
-                            fontSize: 16,
-                            height: 1.35,
-                            color: widget.colorScheme.onSurface,
-                          ),
-                        ),
-                      ),
-                    ],
+                color: widget.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                child: const ListTile(
+                  leading: Icon(Icons.inventory_2_outlined),
+                  title: Text(
+                    '以下為參考目錄（可選）',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    '口試 Demo 請用上方語音流程；目錄直送不經品牌確認',
+                    style: TextStyle(fontSize: 15),
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              const ShopVoiceDemandBar(autoApplyOnRelease: true),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               frequentAsync.when(
                 data: (hints) {
                   if (hints.isEmpty) return const SizedBox.shrink();
