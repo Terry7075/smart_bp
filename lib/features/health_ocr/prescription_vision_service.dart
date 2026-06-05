@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
+import 'package:smart_bp/features/prescription/prescription_models.dart';
 
 import 'ocr_service.dart';
 
@@ -29,6 +30,9 @@ class PrescriptionVisionService {
   final OcrService _ocrService;
   final ImagePicker _picker = ImagePicker();
 
+  /// 釋放底層 ML Kit TextRecognizer；在 widget dispose 時呼叫。
+  Future<void> dispose() => _ocrService.dispose();
+
   Future<PrescriptionResult?> processImage(ImageSource source) async {
     if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) {
       throw UnsupportedError('藥單辨識僅支援 Android 與 iOS 手機。');
@@ -36,8 +40,8 @@ class PrescriptionVisionService {
 
     final picked = await _picker.pickImage(
       source: source,
-      imageQuality: 78,
-      maxWidth: 1280,
+      imageQuality: 88,
+      maxWidth: 1600,
     );
     if (picked == null) return null;
 
@@ -81,59 +85,124 @@ class PrescriptionVisionService {
       'source': 'ocr',
     });
 
-    // --- Step 3: 呼叫 Edge Function，傳「純文字」而非圖片 ---
-    // `supabase_flutter@2.x` 對非 2xx 回應會直接 throw `FunctionException`，
-    // 503（Gemini 過載）必須在這裡接住，否則整串技術字串會跑到長輩 UI。
-    //
-    // 重要：占位列已經以 status='active' 寫進 DB。一旦本段任何環節失敗
-    // （Gemini 429/503、網路斷線、回應格式異常…），都必須把這筆占位列刪掉，
-    // 否則它會以「（藥名請見藥袋或備註）」永久留在長輩的「使用中藥單」清單裡
-    //（activePrescriptionsProvider 只濾 status='active'，不看 vision_status）。
+    // --- Step 3: 呼叫 Edge Function；Gemini 忙碌時自動重試，仍失敗則改本地 OCR 解析 ---
     try {
-      FunctionResponse response;
-      try {
-        response = await _client.functions.invoke(
-          'process_prescription_vision',
-          body: {
-            'prescription_id': prescriptionId,
-            'raw_text': rawText,
-          },
-        );
-      } on FunctionException catch (e) {
-        throw _translateFunctionException(e);
-      }
-
-      final status = response.status;
-      final payload = response.data;
-
-      if (status != 200) {
-        // 某些 supabase_flutter 版本對 4xx/5xx 不丟 exception，仍要翻譯。
-        throw _translatePayloadError(status, payload);
-      }
-
-      if (payload is! Map) {
-        throw StateError('辨識的回應格式怪怪的，請再試一次。');
-      }
-
-      final map = Map<String, dynamic>.from(payload);
-      if (map['ok'] != true) {
-        throw _translatePayloadError(status, map);
-      }
-
-      final data = Map<String, dynamic>.from(
-        (map['data'] as Map?) ?? const {},
-      );
-
-      return _mapVisionData(
-        data: data,
+      return await _invokeVisionWithRetry(
         prescriptionId: prescriptionId,
-        imagePath: picked.path,
         rawText: rawText,
+        imagePath: picked.path,
       );
-    } catch (_) {
+    } catch (e) {
       await _deletePlaceholderRow(prescriptionId);
+      // ignore: avoid_print
+      print('[PrescriptionVision] 雲端解析失敗: $e');
+      if (_isGeminiCapacityError(e)) {
+        // Demo／尖峰時段：雲端 AI 配額滿仍可用本地規則解析，避免整條流程卡死。
+      // ignore: avoid_print
+      print('[PrescriptionVision] Gemini 忙碌，改走本地 OCR 解析');
+        return _ocrService.parseRawText(
+          rawText,
+          imagePath: picked.path,
+        );
+      }
       rethrow;
     }
+  }
+
+  /// 呼叫 Edge Function，配額／過載時短暫重試一次。
+  Future<PrescriptionResult> _invokeVisionWithRetry({
+    required String prescriptionId,
+    required String rawText,
+    required String imagePath,
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        await Future.delayed(const Duration(seconds: 2));
+      }
+      try {
+        return await _invokeVisionOnce(
+          prescriptionId: prescriptionId,
+          rawText: rawText,
+          imagePath: imagePath,
+        );
+      } catch (e) {
+        lastError = e;
+        if (!_isGeminiCapacityError(e)) rethrow;
+      }
+    }
+    throw lastError!;
+  }
+
+  Future<PrescriptionResult> _invokeVisionOnce({
+    required String prescriptionId,
+    required String rawText,
+    required String imagePath,
+  }) async {
+    FunctionResponse response;
+    try {
+      response = await _client.functions.invoke(
+        'process_prescription_vision',
+        body: {
+          'prescription_id': prescriptionId,
+          'raw_text': rawText,
+        },
+      );
+    } on FunctionException catch (e) {
+      throw _translateFunctionException(e);
+    }
+
+    final status = response.status;
+    final payload = response.data;
+
+    if (status != 200) {
+      throw _translatePayloadError(status, payload);
+    }
+
+    if (payload is! Map) {
+      throw StateError('辨識的回應格式怪怪的，請再試一次。');
+    }
+
+    final map = Map<String, dynamic>.from(payload);
+    if (map['ok'] != true) {
+      throw _translatePayloadError(status, map);
+    }
+
+    final data = Map<String, dynamic>.from(
+      (map['data'] as Map?) ?? const {},
+    );
+
+    return _mapVisionData(
+      data: data,
+      prescriptionId: prescriptionId,
+      imagePath: imagePath,
+      rawText: rawText,
+    );
+  }
+
+  /// Gemini 配額滿（429）或暫時過載（503）——可改走本地 OCR 或重試。
+  bool _isGeminiCapacityError(Object e) {
+    if (e is FunctionException) {
+      final details = e.details;
+      String? code;
+      if (details is Map) {
+        code = details['code']?.toString();
+      }
+      return code == 'rate_limit' ||
+          code == 'overload' ||
+          e.status == 429 ||
+          e.status == 503;
+    }
+    if (e is StateError) {
+      final msg = e.message;
+      return msg.contains('人太多') || msg.contains('太忙');
+    }
+    final lower = e.toString().toLowerCase();
+    return lower.contains('429') ||
+        lower.contains('503') ||
+        lower.contains('rate_limit') ||
+        lower.contains('overload') ||
+        lower.contains('太忙碌');
   }
 
   /// 辨識失敗時清掉 [processImage] 寫下的 status='active' 占位列。
@@ -143,7 +212,17 @@ class PrescriptionVisionService {
   /// 殘留的那筆最壞情況也只是孤兒列，但正常情況都會被這裡清掉。
   Future<void> _deletePlaceholderRow(String prescriptionId) async {
     try {
-      await _client.from('prescriptions').delete().eq('id', prescriptionId);
+      final deleted = await _client
+          .from('prescriptions')
+          .delete()
+          .eq('id', prescriptionId)
+          .select('id');
+      if ((deleted as List).isEmpty) {
+        await _client.from('prescriptions').update({
+          'status': 'cancelled',
+          'vision_status': VisionStatus.failed,
+        }).eq('id', prescriptionId);
+      }
     } catch (e) {
       // ignore: avoid_print
       print('[PrescriptionVision] 清除占位藥單列失敗 $prescriptionId: $e');
@@ -237,13 +316,28 @@ class PrescriptionVisionService {
     final isInferred = data['isInferred'] as bool? ?? pickupIso != null;
     final times = _parseStringList(data['takeMedicineTimes']);
     final names = <String>[];
+    final generics = <String>[];
 
     final meds = data['medications'];
     if (meds is List) {
       for (final m in meds) {
         if (m is Map) {
           final n = m['name']?.toString().trim();
-          if (n != null && n.isNotEmpty) names.add(n);
+          final generic = m['genericName']?.toString().trim();
+          if (generic != null && generic.isNotEmpty) generics.add(generic);
+          // 把學名（英文成分）併進顯示／查詢名，例如「雅脈 (Olmesartan)」，
+          // 藥典是用學名建檔，這樣藥典圖片才比對得到。
+          if (n != null && n.isNotEmpty) {
+            if (generic != null &&
+                generic.isNotEmpty &&
+                !n.toLowerCase().contains(generic.toLowerCase())) {
+              names.add('$n ($generic)');
+            } else {
+              names.add(n);
+            }
+          } else if (generic != null && generic.isNotEmpty) {
+            names.add(generic);
+          }
         }
       }
     }
@@ -274,6 +368,7 @@ class PrescriptionVisionService {
       isInferred: isInferred,
       takeMedicineTimes: times,
       medicationNames: names,
+      genericNames: generics,
       pillAppearance: pillAppearance?.trim().isNotEmpty == true
           ? pillAppearance!.trim()
           : null,

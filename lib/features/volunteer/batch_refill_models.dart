@@ -88,14 +88,19 @@ List<BatchRefillGroup> groupPrescriptionsForBatchRefill({
   final now = today ?? DateTime.now();
   final todayOnly = DateTime(now.year, now.month, now.day);
 
-  // --- 過濾：active + 有領藥日 + 10 天寬限期內 ---
+  // --- 過濾：有效藥單或「長輩已刪除但志工仍需確認」+ 有領藥日 + 10 天寬限期內 ---
   final eligible = prescriptions.where((rx) {
-    if (!rx.isActive) return false;
     final pickup = rx.pickupDate;
     if (pickup == null) return false;
     final pickupOnly = DateTime(pickup.year, pickup.month, pickup.day);
     final daysUntil = pickupOnly.difference(todayOnly).inDays;
-    return daysUntil <= 10;
+    if (daysUntil > 10) return false;
+
+    if (RefillStatus.isPrescriptionDeletedByElder(rx.refillStatus)) {
+      return true;
+    }
+    if (!rx.isManageablePrescription) return false;
+    return true;
   }).toList();
 
   // --- 依「領藥日（純日期）」分群 ---

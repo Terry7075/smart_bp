@@ -202,11 +202,20 @@ class _BatchRefillGroupCardState extends ConsumerState<_BatchRefillGroupCard> {
     return _healthCardOverrides[rx.id] ?? rx.hasHealthCard;
   }
 
-  /// 所有勾選必須完成才能解鎖底下兩顆動作鈕；這個 getter 把 override 算進去，
-  /// 避免「勾完最後一個，按鈕還沒亮」的等待感。
+  /// 可執行領藥動作的項目（排除長輩已刪除藥單）。
+  List<BatchRefillElderItem> get _actionableItems => widget.group.items
+      .where(
+        (item) => !RefillStatus.isPrescriptionDeletedByElder(
+          item.prescription.refillStatus,
+        ),
+      )
+      .toList();
+
+  /// 所有「可代領」項目勾選必須完成才能解鎖底下兩顆動作鈕。
   bool get _allHealthCardsCollected {
-    if (widget.group.items.isEmpty) return false;
-    return widget.group.items.every(
+    final items = _actionableItems;
+    if (items.isEmpty) return false;
+    return items.every(
       (item) => _effectiveHasHealthCard(item.prescription),
     );
   }
@@ -224,6 +233,7 @@ class _BatchRefillGroupCardState extends ConsumerState<_BatchRefillGroupCard> {
     PrescriptionRecord rx,
     bool? checked,
   ) async {
+    if (RefillStatus.isPrescriptionDeletedByElder(rx.refillStatus)) return;
     final messenger = ScaffoldMessenger.of(context);
     final repo = ref.read(prescriptionRepositoryProvider);
     final newValue = checked == true;
@@ -269,8 +279,10 @@ class _BatchRefillGroupCardState extends ConsumerState<_BatchRefillGroupCard> {
   Future<void> _completeBatch() async {
     final messenger = ScaffoldMessenger.of(context);
     final repo = ref.read(prescriptionRepositoryProvider);
-    final list =
-        widget.group.items.map((e) => e.prescription).toList(growable: false);
+    final list = _actionableItems
+        .map((e) => e.prescription)
+        .toList(growable: false);
+    if (list.isEmpty) return;
 
     await _withBusy(() async {
       try {
@@ -336,7 +348,8 @@ class _BatchRefillGroupCardState extends ConsumerState<_BatchRefillGroupCard> {
     if (ok != true || !mounted) return;
 
     final messenger = ScaffoldMessenger.of(context);
-    final ids = widget.group.items.map((e) => e.prescription.id).toList();
+    final ids = _actionableItems.map((e) => e.prescription.id).toList();
+    if (ids.isEmpty) return;
 
     await _withBusy(() async {
       try {
@@ -542,6 +555,8 @@ class _ElderRefillRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final rx = item.prescription;
     final status = rx.refillStatus;
+    final deletedByElder =
+        RefillStatus.isPrescriptionDeletedByElder(status);
 
     return Material(
       color: Colors.transparent,
@@ -558,6 +573,27 @@ class _ElderRefillRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (deletedByElder) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEBEE),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFEF9A9A)),
+                  ),
+                  child: const Text(
+                    '⚠️ 此藥單已被刪除，請再次確認',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFC62828),
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               Row(
                 children: [
                   Expanded(
@@ -574,9 +610,11 @@ class _ElderRefillRow extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: status == RefillStatus.outOfStock
+                        color: deletedByElder
                             ? const Color(0xFFFFEBEE)
-                            : const Color(0xFFE3F2FD),
+                            : status == RefillStatus.outOfStock
+                                ? const Color(0xFFFFEBEE)
+                                : const Color(0xFFE3F2FD),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -584,7 +622,8 @@ class _ElderRefillRow extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: status == RefillStatus.outOfStock
+                          color: deletedByElder ||
+                                  status == RefillStatus.outOfStock
                               ? const Color(0xFFC62828)
                               : const Color(0xFF1565C0),
                         ),
@@ -616,20 +655,21 @@ class _ElderRefillRow extends StatelessWidget {
                 ),
               ],
               // CheckboxListTile 自己會吃 onTap，所以勾選不會觸發外層的 InkWell。
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                value: hasHealthCard,
-                onChanged: onHealthCardChanged,
-                title: const Text(
-                  '證件確認：已收到健保卡與慢箋正本',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
+              if (!deletedByElder)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: hasHealthCard,
+                  onChanged: onHealthCardChanged,
+                  title: const Text(
+                    '證件確認：已收到健保卡與慢箋正本',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -639,14 +679,7 @@ class _ElderRefillRow extends StatelessWidget {
 }
 
 /// 點擊長輩列後彈出的「藥單詳細資訊」面板。
-///
-/// 目的：志工出門前 / 領藥當下能快速核對：
-/// - 長輩姓名 + 醫療機構 + 領藥日
-/// - 藥名（合併 OCR 抓到的多個）
-/// - 服藥時段
-/// - 外觀提示（顏色／形狀）
-/// - Vision OCR 抓出的 `medications_detail` JSON 細項（如有）
-class _ElderRefillDetailSheet extends StatelessWidget {
+class _ElderRefillDetailSheet extends ConsumerWidget {
   const _ElderRefillDetailSheet({required this.item});
 
   final BatchRefillElderItem item;
@@ -660,11 +693,13 @@ class _ElderRefillDetailSheet extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final rx = item.prescription;
     final times = rx.takeMedicineTimes;
     final meds = rx.medicationsDetail;
     final pillHint = rx.displayPillHint;
+    final deletedByElder =
+        RefillStatus.isPrescriptionDeletedByElder(rx.refillStatus);
 
     return SafeArea(
       top: false,
@@ -692,6 +727,28 @@ class _ElderRefillDetailSheet extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
+              if (deletedByElder) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEBEE),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFEF9A9A)),
+                  ),
+                  child: const Text(
+                    '⚠️ 此藥單已被刪除，請再次確認\n'
+                    '建議電話聯繫長輩，確認是否仍需要代領。',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFC62828),
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
               Row(
                 children: [
                   const Icon(Icons.person,
@@ -773,6 +830,64 @@ class _ElderRefillDetailSheet extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 20),
+              if (deletedByElder) ...[
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: FilledButton(
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      try {
+                        await ref
+                            .read(prescriptionRepositoryProvider)
+                            .dismissDeletedPrescriptionRefill(rx.id);
+                        if (!context.mounted) return;
+                        Navigator.of(context).pop();
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            backgroundColor: Color(0xFF2E7D32),
+                            content: Text(
+                              '已結案：此代領項目已移出清單。',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        );
+                      } catch (e) {
+                        if (!context.mounted) return;
+                        messenger.showSnackBar(
+                          SnackBar(
+                            backgroundColor: const Color(0xFFC62828),
+                            content: Text(
+                              '結案失敗：$e',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      '✅ 已與長輩確認，結案',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               SizedBox(
                 width: double.infinity,
                 height: 52,

@@ -88,7 +88,7 @@ Dashboard → **Project Settings** → **Edge Functions** → **Secrets**：
 | Name | Value |
 |------|--------|
 | `GEMINI_API_KEY` | 你的 [Google AI Studio](https://aistudio.google.com/apikey) API Key |
-| `GEMINI_MODEL`（選填） | 預設 `gemini-2.0-flash`；勿再用已下架的 `gemini-1.5-flash` |
+| `GEMINI_MODEL`（選填） | 預設 `gemini-2.5-flash` |
 
 （`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY` 通常已自動注入，無需手動加。）
 

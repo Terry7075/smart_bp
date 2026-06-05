@@ -1,9 +1,17 @@
+import 'dart:io';
+import 'dart:math' show Random;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../volunteer/batch_refill_models.dart';
 import 'prescription_models.dart';
+
+/// 長輩藥單原始照片的私人 bucket（志工代領時核對原圖）。
+///
+/// 只有長輩勾選「需要志工代領」時才上傳；一般掃描不會把照片傳到志工端。
+const String prescriptionPhotosBucket = 'prescription-photos';
 
 final prescriptionRepositoryProvider = Provider<PrescriptionRepository>((ref) {
   return PrescriptionRepository(Supabase.instance.client);
@@ -66,12 +74,57 @@ class PrescriptionRepository {
         .select()
         .eq('user_id', userId)
         .eq('status', 'active')
+        .inFilter('vision_status', const [
+          VisionStatus.none,
+          VisionStatus.completed,
+        ])
         .order('created_at', ascending: false);
 
     return [
       for (final row in rows as List<dynamic>)
         PrescriptionRecord.fromMap(row as Map<String, dynamic>),
     ];
+  }
+
+  /// 清掉不應顯示在「我的藥單」的 Vision 占位列（failed / 過期 processing）。
+  ///
+  /// 若 DELETE 被 RLS 擋下，改 soft-cancel（`status='cancelled'`）。
+  Future<void> cleanupHiddenVisionPrescriptions(
+    List<PrescriptionRecord> prescriptions,
+  ) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) return;
+
+    final now = DateTime.now();
+    for (final rx in prescriptions) {
+      if (rx.userId != uid || !rx.isActive) continue;
+
+      final shouldRemove = rx.visionStatus == VisionStatus.failed ||
+          (rx.visionStatus == VisionStatus.processing &&
+              now.difference(rx.createdAt) > const Duration(minutes: 15));
+      if (!shouldRemove) continue;
+
+      try {
+        final deleted = await _client
+            .from('prescriptions')
+            .delete()
+            .eq('id', rx.id)
+            .eq('user_id', uid)
+            .select('id');
+        if ((deleted as List).isEmpty) {
+          await _client
+              .from('prescriptions')
+              .update({
+                'status': 'cancelled',
+                'vision_status': VisionStatus.failed,
+              })
+              .eq('id', rx.id)
+              .eq('user_id', uid);
+        }
+      } catch (_) {
+        // best-effort；UI 仍會用 isManageablePrescription 過濾。
+      }
+    }
   }
 
   /// Realtime：該使用者名下所有藥單列（含 `pending_verification` / `active` 等）。
@@ -130,6 +183,8 @@ class PrescriptionRepository {
     DateTime? baselineDate,
     String? pillAppearance,
     String? rawNotes,
+    String refillStatus = RefillStatus.none,
+    String? photoStoragePath,
   }) async {
     await _client.from('prescriptions').insert({
       'id': id,
@@ -144,9 +199,51 @@ class PrescriptionRepository {
       if (pillAppearance != null && pillAppearance.trim().isNotEmpty)
         'pill_appearance': pillAppearance.trim(),
       if (rawNotes != null && rawNotes.isNotEmpty) 'notes': rawNotes,
+      if (photoStoragePath != null && photoStoragePath.trim().isNotEmpty)
+        'photo_storage_path': photoStoragePath.trim(),
+      'refill_status': refillStatus,
       'status': 'active',
       'source': 'ocr',
     });
+  }
+
+  /// 長輩勾選「需要志工代領」後，寫入本次／下次領藥日與代領狀態。
+  ///
+  /// Vision 流程占位列已存在時用 UPDATE；與 [insertOcrPrescription] 的
+  /// 代領欄位語意一致。
+  Future<void> updateVolunteerRefillSchedule({
+    required String prescriptionId,
+    required DateTime nextPickupDate,
+    required DateTime baselineDate,
+    int? medicationDays,
+    String refillStatus = RefillStatus.pendingCollection,
+    String? photoStoragePath,
+  }) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) throw StateError('尚未登入');
+
+    final payload = <String, dynamic>{
+      'pickup_date': _formatIsoDate(nextPickupDate),
+      'baseline_date': _formatIsoDate(baselineDate),
+      'refill_status': refillStatus,
+    };
+    if (medicationDays case final int d) {
+      payload['medication_days'] = d;
+    }
+    if (photoStoragePath != null && photoStoragePath.trim().isNotEmpty) {
+      payload['photo_storage_path'] = photoStoragePath.trim();
+    }
+
+    final updated = await _client
+        .from('prescriptions')
+        .update(payload)
+        .eq('id', prescriptionId)
+        .eq('user_id', uid)
+        .select('id');
+
+    if ((updated as List).isEmpty) {
+      throw StateError('更新代領日程失敗：資料庫沒有更新這張藥單。');
+    }
   }
 
   /// 長輩端補同步：優先 UPDATE 既有列（避免 upsert 觸發 INSERT RLS 問題）。
@@ -233,6 +330,82 @@ class PrescriptionRepository {
         .eq('user_id', uid);
   }
 
+  /// 上傳長輩拍的原始藥單照片到 `prescription-photos` 私人 bucket。
+  ///
+  /// 只在長輩勾選「需要志工代領」時呼叫——志工才看得到、也才需要核對原圖。
+  /// 路徑規則 `{auth.uid()}/{timestamp}_{rand}.{ext}` 對齊 Storage RLS：
+  /// 長輩只能讀寫自己資料夾，志工（role='volunteer'）可讀整個 bucket。
+  ///
+  /// 回傳 object path（寫進 `prescriptions.photo_storage_path`）。
+  Future<String> uploadPrescriptionPhoto({
+    required String localPath,
+  }) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) throw StateError('尚未登入');
+
+    final file = File(localPath);
+    if (!await file.exists()) {
+      throw StateError('找不到剛剛拍的照片檔案，請再試一次。');
+    }
+
+    final ext = _safePhotoExtension(localPath);
+    final filename =
+        '${DateTime.now().millisecondsSinceEpoch}_${1000 + Random().nextInt(8999)}.$ext';
+    final objectPath = '$uid/$filename';
+
+    await _client.storage.from(prescriptionPhotosBucket).upload(
+          objectPath,
+          file,
+          fileOptions: FileOptions(
+            upsert: false,
+            contentType: _mimeForPhotoExtension(ext),
+          ),
+        );
+
+    return objectPath;
+  }
+
+  static String _safePhotoExtension(String path) {
+    final lastDot = path.lastIndexOf('.');
+    if (lastDot < 0 || lastDot == path.length - 1) return 'jpg';
+    final ext = path.substring(lastDot + 1).toLowerCase();
+    const allowed = {'jpg', 'jpeg', 'png', 'webp'};
+    return allowed.contains(ext) ? ext : 'jpg';
+  }
+
+  static String _mimeForPhotoExtension(String ext) {
+    switch (ext) {
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'jpg':
+      case 'jpeg':
+      default:
+        return 'image/jpeg';
+    }
+  }
+
+  /// 長輩在確認頁修正用藥天數後回寫（Vision 占位列或一般 OCR 皆適用）。
+  Future<void> updateMedicationDays({
+    required String prescriptionId,
+    required int medicationDays,
+  }) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) throw StateError('尚未登入');
+
+    final updated = await _client
+        .from('prescriptions')
+        .update({'medication_days': medicationDays})
+        .eq('id', prescriptionId)
+        .eq('user_id', uid)
+        .select('id');
+
+    if ((updated as List).isEmpty) {
+      throw StateError('更新用藥天數失敗：資料庫沒有更新這張藥單。');
+    }
+  }
+
   /// 軟刪除：把藥單狀態設為 `cancelled`（不再對外顯示但 DB 仍保留）。
   ///
   /// 目前 UI 已改成走 [deletePrescription]（硬刪除），這個方法保留只給
@@ -250,14 +423,46 @@ class PrescriptionRepository {
 
   /// 硬刪除：實際 DELETE 該列藥單。
   ///
+  /// 若已申請志工代領（`refill_status` 非 none），改為軟保留：
+  /// `status=cancelled`、`refill_status=prescription_deleted`，志工端仍看得到
+  /// 並提示「此藥單已被刪除，請再次確認」。
+  ///
   /// 注意：Supabase 在 RLS 拒絕 DELETE 時**不會 throw**，只會回傳空陣列。
   /// 因此必須 `.select('id')` 確認真的有刪到，否則 UI 會誤顯示「已刪除」。
-  ///
-  /// 若該藥單與 `volunteer_tasks` 共用 id（志工協助流程），會一併把任務
-  /// 標成 `cancelled`，避免 [elderPrescriptionSync] 立刻把藥單又 insert 回來。
   Future<void> deletePrescription(String prescriptionId) async {
     final uid = _client.auth.currentUser?.id;
     if (uid == null) throw StateError('尚未登入');
+
+    final row = await _client
+        .from('prescriptions')
+        .select('refill_status')
+        .eq('id', prescriptionId)
+        .eq('user_id', uid)
+        .maybeSingle();
+
+    if (row == null) {
+      throw StateError('找不到這張藥單，可能已被刪除。');
+    }
+
+    final refillStatus =
+        (row['refill_status'] as String?) ?? RefillStatus.none;
+
+    if (RefillStatus.shouldRetainVolunteerRefillOnDelete(refillStatus)) {
+      final updated = await _client
+          .from('prescriptions')
+          .update({
+            'status': 'cancelled',
+            'refill_status': RefillStatus.prescriptionDeleted,
+          })
+          .eq('id', prescriptionId)
+          .eq('user_id', uid)
+          .select('id');
+
+      if ((updated as List).isEmpty) {
+        throw StateError('刪除失敗：無法更新這張藥單（可能是權限問題）。');
+      }
+      return;
+    }
 
     // 志工任務與 prescriptions 常共用 UUID；只 cancel 自己的任務。
     try {
@@ -283,6 +488,18 @@ class PrescriptionRepository {
         '請到 Supabase SQL Editor 執行：\n'
         'supabase/migrations/20260508211000_prescriptions_delete_fix.sql',
       );
+    }
+  }
+
+  /// 志工確認「長輩已刪除藥單」後結案，移出代領清單。
+  Future<void> dismissDeletedPrescriptionRefill(String prescriptionId) async {
+    final updated = await _client.from('prescriptions').update({
+      'refill_status': RefillStatus.none,
+      'has_health_card': false,
+    }).eq('id', prescriptionId).select('id');
+
+    if ((updated as List).isEmpty) {
+      throw StateError('結案失敗：資料庫沒有更新這張代領項目。');
     }
   }
 
@@ -348,11 +565,14 @@ class PrescriptionRepository {
     }
   }
 
-  /// 領藥完成：展延領藥日、重置代領狀態。
+  /// 領藥完成：展延領藥日、重置代領狀態（略過長輩已刪除的藥單）。
   Future<void> completeBatchRefill(
     List<PrescriptionRecord> prescriptions,
   ) async {
     for (final rx in prescriptions) {
+      if (RefillStatus.isPrescriptionDeletedByElder(rx.refillStatus)) {
+        continue;
+      }
       final extendDays = rx.medicationDays ?? 28;
       final base = rx.pickupDate ?? DateTime.now();
       final baseOnly = DateTime(base.year, base.month, base.day);

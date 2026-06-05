@@ -54,7 +54,9 @@ final elderNotificationBadgeCountProvider = Provider.autoDispose<int>((ref) {
   var count = rxList.where((r) => r.isPendingVerification).length;
   count += rxList
       .where(
-        (r) => r.isActive && r.refillStatus == RefillStatus.outOfStock,
+        (r) =>
+            r.isManageablePrescription &&
+            r.refillStatus == RefillStatus.outOfStock,
       )
       .length;
 
@@ -128,7 +130,14 @@ final elderPrescriptionSyncProvider = Provider.autoDispose<void>((ref) {
   ref.listen<AsyncValue<List<PrescriptionRecord>>>(
     elderPrescriptionsStreamProvider,
     (_, next) {
-      if (next.hasValue) unawaited(run());
+      if (next.hasValue) {
+        unawaited(run());
+        unawaited(
+          ref
+              .read(prescriptionRepositoryProvider)
+              .cleanupHiddenVisionPrescriptions(next.requireValue),
+        );
+      }
     },
     fireImmediately: true,
   );

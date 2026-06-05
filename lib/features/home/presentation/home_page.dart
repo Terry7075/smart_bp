@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_bp/features/activities/elder_activities_page.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/health/presentation/health_page.dart';
@@ -160,7 +161,9 @@ class _HomePageState extends ConsumerState<HomePage> {
             ? const HealthPage()
             : navIndex == 4
                 ? const ElderMonitoringTab()
-                : SingleChildScrollView(
+                : navIndex == 5
+                    ? const ElderActivitiesPage()
+                    : SingleChildScrollView(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 12),
                     child: Column(

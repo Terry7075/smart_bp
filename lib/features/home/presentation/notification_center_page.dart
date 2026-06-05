@@ -88,7 +88,8 @@ class _NotificationBody extends StatelessWidget {
     final outOfStock = list
         .where(
           (r) =>
-              r.status == 'active' && r.refillStatus == RefillStatus.outOfStock,
+              r.isManageablePrescription &&
+              r.refillStatus == RefillStatus.outOfStock,
         )
         .toList();
     final recentlyConfirmed = list

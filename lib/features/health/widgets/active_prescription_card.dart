@@ -245,6 +245,8 @@ class ActivePrescriptionCard extends ConsumerWidget {
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final hasVolunteerRefill =
+        RefillStatus.shouldRetainVolunteerRefillOnDelete(record.refillStatus);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -252,10 +254,15 @@ class ActivePrescriptionCard extends ConsumerWidget {
           '確定刪除這張藥單？',
           style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
         ),
-        content: const Text(
-          '會關掉這張藥單的所有鬧鐘，並把它從清單上拿掉。\n'
-          '已經吃藥的打卡紀錄也會一併移除，刪除後無法復原。',
-          style: TextStyle(fontSize: 19, height: 1.45, fontWeight: FontWeight.w600),
+        content: Text(
+          hasVolunteerRefill
+              ? '會關掉這張藥單的所有鬧鐘，並把它從清單上拿掉。\n'
+                  '已經吃藥的打卡紀錄也會一併移除，刪除後無法復原。\n\n'
+                  '您已申請志工代領：志工端仍會看到提醒，'
+                  '請主動告知志工或請志工再次確認。'
+              : '會關掉這張藥單的所有鬧鐘，並把它從清單上拿掉。\n'
+                  '已經吃藥的打卡紀錄也會一併移除，刪除後無法復原。',
+          style: const TextStyle(fontSize: 19, height: 1.45, fontWeight: FontWeight.w600),
         ),
         actionsPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

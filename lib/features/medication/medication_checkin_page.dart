@@ -93,6 +93,9 @@ class _MedicationCheckinPageState extends ConsumerState<MedicationCheckinPage>
                 medicationName: rx.medicationName,
                 medicationsDetail: rx.medicationsDetail,
               );
+        final generics = rx == null
+            ? const <String>[]
+            : buildDrugLookupGenericNames(rx.medicationsDetail);
         print('[Checkin] drug lookup candidates: $candidates');
         setState(() {
           _prescription = rx;
@@ -102,9 +105,10 @@ class _MedicationCheckinPageState extends ConsumerState<MedicationCheckinPage>
           // 不用每次進打卡頁都重打 Supabase。
           _drugImageFuture = candidates.isEmpty
               ? Future<DrugImageLookup>.value(const DrugImageNotFound())
-              : ref
-                  .read(drugDictionaryServiceProvider)
-                  .fetchDrugImageForCandidates(candidates);
+              : ref.read(drugDictionaryServiceProvider).fetchDrugImageForCandidates(
+                    candidates,
+                    genericNames: generics,
+                  );
         });
       }
     } catch (e) {
@@ -129,12 +133,16 @@ class _MedicationCheckinPageState extends ConsumerState<MedicationCheckinPage>
       medicationName: rx.medicationName,
       medicationsDetail: rx.medicationsDetail,
     );
+    final generics = buildDrugLookupGenericNames(rx.medicationsDetail);
+    final service = ref.read(drugDictionaryServiceProvider);
+    service.invalidateCache(candidates, genericNames: generics);
     setState(() {
       _drugImageFuture = candidates.isEmpty
           ? Future<DrugImageLookup>.value(const DrugImageNotFound())
-          : ref
-              .read(drugDictionaryServiceProvider)
-              .fetchDrugImageForCandidates(candidates);
+          : service.fetchDrugImageForCandidates(
+              candidates,
+              genericNames: generics,
+            );
     });
   }
 

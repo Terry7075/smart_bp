@@ -32,9 +32,27 @@ sealed class DrugImageLookup {
 }
 
 /// 比對成功且能解析到可用的圖片 URL。
+///
+/// [exactBrand]：
+/// - `true`  → 藥典裡有「同藥廠的相同產品」（品牌詞吻合），圖片即長輩手中的藥。
+/// - `false` → 只比對到「相同成分、不同藥廠」的產品；藥丸外觀可能不同，UI 需顯示
+///   [referenceNote] 警語，避免長輩誤認。
 class DrugImageMatched extends DrugImageLookup {
-  const DrugImageMatched(this.imageUrl);
+  const DrugImageMatched(
+    this.imageUrl, {
+    this.fallbackUrls = const [],
+    this.exactBrand = true,
+    this.referenceNote,
+  });
   final String imageUrl;
+
+  /// 同一比對層級的其他圖片網址；主 URL 載入失敗時 UI 依序嘗試（仍為
+  /// 同款或同成分參考，不跨到不同學名）。
+  final List<String> fallbackUrls;
+  final bool exactBrand;
+
+  /// 非完全同款時，要顯示給長輩看的提醒文字（例：相同成分、外觀可能不同）。
+  final String? referenceNote;
 }
 
 /// 服務正常完成查詢，但藥典裡確實沒有匹配的列。
@@ -77,7 +95,7 @@ class DrugDictionaryService {
     'drugs',
   ];
 
-  /// 單次查詢的總 timeout：包含 PostgREST 查藥典 + Storage list 驗證。
+  /// 單次查詢的總 timeout：包含 PostgREST 查藥典 + Storage 解析。
   /// 設 5 秒：足夠正常網路完成，但網路差時長輩不會看著轉圈轉太久。
   static const Duration _queryTimeout = Duration(seconds: 5);
 
@@ -97,8 +115,14 @@ class DrugDictionaryService {
     '錠', '膠囊', '公克', '毫克', '微克',
   };
 
-  /// 搜尋字最小長度（含中文）。`mg`、`錠` 等 2 個字以下太短，誤命中率高。
-  static const int _minTermLength = 3;
+  /// 英文搜尋字最小長度。`mg`、`tab` 等太短，誤命中率高。
+  static const int _minLatinTermLength = 3;
+
+  /// 中文藥名常見 2 字（如「雅脈」），允許較短。
+  static const int _minCjkTermLength = 2;
+
+  /// Storage signed URL 有效秒數（與志工審單照片相同策略）。
+  static const int _signedUrlTtlSeconds = 3600;
 
   /// 內存快取：以排序後的 candidate 字串組為 key。
   /// 命中時跳過 PostgREST + Storage list，可省下整個 round-trip。
@@ -112,12 +136,19 @@ class DrugDictionaryService {
   ///
   /// 回傳 [DrugImageLookup] 區分三種情境：成功 / 找不到 / 查詢失敗。
   /// 全域 [_queryTimeout] 守門，逾時直接回 [DrugImageLookupFailed]。
+  /// 從一張處方紀錄的多個候選藥名查詢藥典圖片。
+  ///
+  /// [genericNames]：藥品「學名／英文成分」清單（弱詞）。**只用來放寬資料庫
+  /// 查詢的召回**，不能單獨成立比對——因為同學名不同藥廠的藥丸外觀不同，
+  /// 若只靠學名命中就顯示圖會誤導長輩認藥。最終只採用「品牌詞」（候選藥名
+  /// 去掉學名後）有吻合的藥典列。
   Future<DrugImageLookup> fetchDrugImageForCandidates(
-    List<String> candidates,
-  ) async {
+    List<String> candidates, {
+    List<String> genericNames = const [],
+  }) async {
     if (candidates.isEmpty) return const DrugImageNotFound();
 
-    final cacheKey = _cacheKey(candidates);
+    final cacheKey = _cacheKey(candidates, genericNames);
     final cached = _imageUrlCache[cacheKey];
     if (cached != null) {
       print('[DrugDictionary] cache hit "$cacheKey"');
@@ -125,11 +156,9 @@ class DrugDictionaryService {
     }
 
     try {
-      final url = await _fetchImageForCandidates(candidates)
+      final matched = await _fetchImageForCandidates(candidates, genericNames)
           .timeout(_queryTimeout);
-      final result = url == null
-          ? const DrugImageNotFound()
-          : DrugImageMatched(url);
+      final DrugImageLookup result = matched ?? const DrugImageNotFound();
       _imageUrlCache[cacheKey] = result;
       return result;
     } on TimeoutException catch (_) {
@@ -145,45 +174,184 @@ class DrugDictionaryService {
   Future<DrugImageLookup> fetchDrugImage(String drugName) =>
       fetchDrugImageForCandidates([drugName]);
 
-  String _cacheKey(List<String> candidates) {
-    final cleaned = candidates
-        .map((c) => c.trim())
-        .where((c) => c.isNotEmpty)
-        .toList()
-      ..sort();
-    return cleaned.join('|');
+  /// 清除指定候選藥名的快取（重試查詢前呼叫，避免 [DrugImageNotFound] 被永久命中）。
+  void invalidateCache(List<String> candidates,
+      {List<String> genericNames = const []}) {
+    _imageUrlCache.remove(_cacheKey(candidates, genericNames));
   }
 
-  Future<String?> _fetchImageForCandidates(List<String> candidates) async {
+  String _cacheKey(List<String> candidates, List<String> genericNames) {
+    final cleaned = candidates
+        .map(_normalizeCandidateForCache)
+        .where((c) => c.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    final gen = genericNames
+        .map(_normalizeCandidateForCache)
+        .where((c) => c.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    return '${cleaned.join('|')}##${gen.join('|')}';
+  }
+
+  static String _normalizeCandidateForCache(String raw) {
+    return raw
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  Future<DrugImageMatched?> _fetchImageForCandidates(
+    List<String> candidates,
+    List<String> genericNames,
+  ) async {
     final terms = <String>{};
     for (final raw in candidates) {
-      terms.addAll(_searchTerms(raw));
+      terms.addAll(expandDrugLookupSearchTerms(raw));
+    }
+    // 複方學名（如 "Pioglitazone Metformin"）拆成各成分，提高藥典召回。
+    for (final g in genericNames) {
+      terms.addAll(expandGenericNameSearchTerms(g));
     }
 
-    // 1) Forward：把所有 term × name_zh/name_en 並列成一個 .or() 一次打。
-    final forward = await _forwardSearch(terms);
-    if (forward != null) {
-      return _resolveImageUrl(forward['image_url']);
+    // 「品牌詞」= 全部候選詞 − 學名詞。只有品牌詞吻合才算「同藥廠產品」。
+    final genericNormalized = <String>{};
+    for (final g in genericNames) {
+      for (final t in expandGenericNameSearchTerms(g)) {
+        genericNormalized.add(_normalizeForSubstringMatch(t));
+      }
+    }
+    final brandTerms = <String>{};
+    for (final t in terms) {
+      final n = _normalizeForSubstringMatch(t);
+      if (n.isEmpty) continue;
+      if (genericNormalized.contains(n)) continue;
+      brandTerms.add(n);
     }
 
-    // 2) Reverse：「藥典名」是處方藥名的子字串（例如處方寫
-    //    「ATORVASTATIN 20mg」、藥典存「Atorvastatin」），這只能 client-side
-    //    比對，但限制取樣 500 筆避免拖垮網路。
-    final reverse = await _reverseSearch(candidates);
-    if (reverse != null) {
-      return _resolveImageUrl(reverse['image_url']);
+    // 一次取回 forward + reverse 候選列（reverse 只在 forward 沒撈到時才打）。
+    final forwardRows = await _forwardSearch(terms);
+    final reverseRows =
+        forwardRows.isEmpty ? await _reverseSearch(candidates) : forwardRows;
+    final allRows = forwardRows.isEmpty
+        ? reverseRows
+        : <Map<String, dynamic>>[...forwardRows, ...reverseRows];
+
+    // 第一階：品牌詞吻合 → 視為「同藥廠相同產品」，顯示其圖（exactBrand=true）。
+    final brandUrls = await _collectBrandMatchedImageUrls(allRows, brandTerms);
+    if (brandUrls.isNotEmpty) {
+      print('[DrugDictionary] brand match: primary=${brandUrls.first}');
+      return DrugImageMatched(
+        brandUrls.first,
+        fallbackUrls: brandUrls.length > 1 ? brandUrls.sublist(1) : const [],
+        exactBrand: true,
+      );
     }
 
-    print('[DrugDictionary] no dictionary entry matched: $candidates');
+    // 第二階：沒有品牌吻合，但有「相同成分（學名）」的列 → 顯示圖但加警語。
+    final genericUrls = await _collectResolvableImageUrls(allRows);
+    if (genericUrls.isNotEmpty) {
+      print('[DrugDictionary] generic fallback: primary=${genericUrls.first}');
+      return DrugImageMatched(
+        genericUrls.first,
+        fallbackUrls:
+            genericUrls.length > 1 ? genericUrls.sublist(1) : const [],
+        exactBrand: false,
+        referenceNote: _buildReferenceNote(genericNames),
+      );
+    }
+
+    print(
+      '[DrugDictionary] no entry matched: candidates=$candidates '
+      'brandTerms=$brandTerms',
+    );
     return null;
   }
 
-  Future<Map<String, dynamic>?> _forwardSearch(Set<String> terms) async {
+  /// 組「同成分參考圖」警語。有學名時帶上學名讓長輩／志工更清楚。
+  String _buildReferenceNote(List<String> genericNames) {
+    final gens = genericNames
+        .map((g) => g.trim())
+        .where((g) => g.isNotEmpty)
+        .toSet()
+        .toList();
+    if (gens.isEmpty) {
+      return '這可能是相同成分的另一款藥，外觀可能不同，僅供參考。';
+    }
+    return '這是相同成分（${gens.join('、')}）的另一款藥，'
+        '外觀可能不同，請以手中藥袋為準，僅供參考。';
+  }
+
+  /// 收集「品牌詞吻合」列的可解析圖片 URL（去重、最多 [_maxImageUrlsPerTier] 筆）。
+  Future<List<String>> _collectBrandMatchedImageUrls(
+    List<Map<String, dynamic>> rows,
+    Set<String> brandTerms,
+  ) async {
+    final out = <String>[];
+    final seen = <String>{};
+    for (final row in rows) {
+      if (!_rowMatchesBrand(row, brandTerms)) continue;
+      final url = await _resolveImageUrl(row['image_url']);
+      if (url != null && seen.add(url)) {
+        out.add(url);
+        if (out.length >= _maxImageUrlsPerTier) break;
+      }
+    }
+    return out;
+  }
+
+  /// 收集所有可解析圖片 URL（同成分 fallback；去重、最多 [_maxImageUrlsPerTier] 筆）。
+  Future<List<String>> _collectResolvableImageUrls(
+    List<Map<String, dynamic>> rows,
+  ) async {
+    final out = <String>[];
+    final seen = <String>{};
+    for (final row in rows) {
+      final url = await _resolveImageUrl(row['image_url']);
+      if (url != null && seen.add(url)) {
+        out.add(url);
+        if (out.length >= _maxImageUrlsPerTier) break;
+      }
+    }
+    return out;
+  }
+
+  /// 同一比對層級最多保留幾個備援 URL（主 URL 載入失敗時 UI 依序嘗試）。
+  static const int _maxImageUrlsPerTier = 5;
+
+  /// 藥典列的中／英文名是否包含任一「品牌詞」。
+  ///
+  /// 品牌詞需夠有鑑別度：中文 ≥2 字、英文 ≥4 字（去標點後比對），避免
+  /// 「錠」「mg」這類雜詞造成假吻合。
+  bool _rowMatchesBrand(Map<String, dynamic> row, Set<String> brandTerms) {
+    if (brandTerms.isEmpty) return false;
+    final zh = _normalizeForSubstringMatch(row['name_zh']?.toString() ?? '');
+    final en = _normalizeForSubstringMatch(row['name_en']?.toString() ?? '');
+    if (zh.isEmpty && en.isEmpty) return false;
+
+    for (final bt in brandTerms) {
+      final isCjk = _containsCjk(bt);
+      if (isCjk) {
+        if (bt.length < 2) continue;
+      } else {
+        if (bt.length < 4) continue;
+      }
+      if ((zh.isNotEmpty && zh.contains(bt)) ||
+          (en.isNotEmpty && en.contains(bt))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Future<List<Map<String, dynamic>>> _forwardSearch(Set<String> terms) async {
     final safeTerms = terms
         .map(_sanitizeOrTerm)
         .where((t) => t.isNotEmpty)
         .toSet();
-    if (safeTerms.isEmpty) return null;
+    if (safeTerms.isEmpty) return const [];
 
     // PostgREST `.or()` 語法：`col.op.value,col.op.value,...`，ilike 的萬用字元
     // 在這裡要用 `*`（HTTP 端會被轉成 `%`）。
@@ -205,27 +373,29 @@ class DrugDictionaryService {
           .whereType<Map>()
           .map((m) => Map<String, dynamic>.from(m))
           .toList();
-      if (list.isEmpty) return null;
+      if (list.isEmpty) return const [];
 
-      // 若多筆命中，挑「藥典名最短」者；通常代表更精確（避免把通用詞撈來）。
+      // 若多筆命中，挑「藥典名最短」者優先；解析圖片時仍會依序嘗試每列。
       list.sort((a, b) {
         final la = _shorterName(a);
         final lb = _shorterName(b);
         return la.compareTo(lb);
       });
-      return list.first;
+      return list;
     } catch (e) {
       print('[DrugDictionary] _forwardSearch error: $e');
-      return null;
+      return const [];
     }
   }
 
-  Future<Map<String, dynamic>?> _reverseSearch(List<String> candidates) async {
-    final lowerCandidates = candidates
-        .map((c) => c.trim().toLowerCase())
-        .where((c) => c.isNotEmpty)
+  Future<List<Map<String, dynamic>>> _reverseSearch(
+    List<String> candidates,
+  ) async {
+    final normalizedCandidates = candidates
+        .map(_normalizeForSubstringMatch)
+        .where((c) => c.length >= 2)
         .toList();
-    if (lowerCandidates.isEmpty) return null;
+    if (normalizedCandidates.isEmpty) return const [];
 
     try {
       final rows = await _client
@@ -233,24 +403,44 @@ class DrugDictionaryService {
           .select('image_url, name_zh, name_en')
           .limit(_reverseSearchLimit);
 
+      final matches = <Map<String, dynamic>>[];
+      final seenRowKeys = <String>{};
       for (final raw in rows as List) {
         final map = Map<String, dynamic>.from(raw as Map);
+        final rowKey =
+            '${map['name_zh']}|${map['name_en']}|${map['image_url']}';
+        if (!seenRowKeys.add(rowKey)) continue;
         for (final key in const ['name_zh', 'name_en']) {
           final dictName = map[key]?.toString().trim() ?? '';
           if (dictName.length < 2) continue;
-          final lowerDict = dictName.toLowerCase();
-          for (final cand in lowerCandidates) {
-            if (cand.contains(lowerDict) || lowerDict.contains(cand)) {
-              return map;
+          final normalizedDict = _normalizeForSubstringMatch(dictName);
+          for (final cand in normalizedCandidates) {
+            if (cand.contains(normalizedDict) ||
+                normalizedDict.contains(cand)) {
+              matches.add(map);
+              break;
             }
           }
         }
       }
-      return null;
+
+      matches.sort((a, b) {
+        final la = _shorterName(a);
+        final lb = _shorterName(b);
+        return la.compareTo(lb);
+      });
+      return matches;
     } catch (e) {
       print('[DrugDictionary] _reverseSearch error: $e');
-      return null;
+      return const [];
     }
+  }
+
+  /// 子字串比對前去掉空白與標點，避免 `雅脈(Olmesartan)` 對不到 `Olmesartan`。
+  static String _normalizeForSubstringMatch(String raw) {
+    return raw
+        .toLowerCase()
+        .replaceAll(RegExp(r'[\s,，、+/／()（）."\\\u0027-]+'), '');
   }
 
   int _shorterName(Map<String, dynamic> row) {
@@ -282,7 +472,7 @@ class DrugDictionaryService {
     if (value.isEmpty) return null;
 
     if (value.startsWith('http://') || value.startsWith('https://')) {
-      return value;
+      return normalizeExternalImageUrl(value);
     }
 
     if (value.contains('/')) {
@@ -290,14 +480,20 @@ class DrugDictionaryService {
       final bucket = value.substring(0, slash);
       final objectPath = value.substring(slash + 1);
       if (objectPath.isNotEmpty) {
-        return _client.storage.from(bucket).getPublicUrl(objectPath);
+        return _resolveStorageObjectUrl(
+          bucket: bucket,
+          objectPath: objectPath,
+          skipExistsCheck: true,
+        );
       }
     }
 
     for (final bucket in _candidateBuckets) {
-      if (await _objectExistsInBucket(bucket: bucket, filename: value)) {
-        return _client.storage.from(bucket).getPublicUrl(value);
-      }
+      final url = await _resolveStorageObjectUrl(
+        bucket: bucket,
+        objectPath: value,
+      );
+      if (url != null) return url;
     }
 
     print(
@@ -307,60 +503,135 @@ class DrugDictionaryService {
     return null;
   }
 
-  /// 用 Storage list API 檢查指定 bucket 是否存有此檔（**精確檔名**比對）。
+  /// Private bucket 需 signed URL；public bucket 則 signed / public 皆可。
+  Future<String?> _resolveStorageObjectUrl({
+    required String bucket,
+    required String objectPath,
+    bool skipExistsCheck = false,
+  }) async {
+    if (!skipExistsCheck &&
+        !await _objectExistsInBucket(bucket: bucket, filename: objectPath)) {
+      return null;
+    }
+
+    try {
+      return await _client.storage
+          .from(bucket)
+          .createSignedUrl(objectPath, _signedUrlTtlSeconds);
+    } catch (e) {
+      print('[DrugDictionary] signedUrl($bucket/$objectPath) failed: $e');
+    }
+
+    try {
+      return _client.storage.from(bucket).getPublicUrl(objectPath);
+    } catch (e) {
+      print('[DrugDictionary] publicUrl($bucket/$objectPath) failed: $e');
+    }
+    return null;
+  }
+
+  /// 用 Storage list API 檢查指定 bucket 是否存有此檔（精確或子路徑檔名比對）。
   Future<bool> _objectExistsInBucket({
     required String bucket,
     required String filename,
   }) async {
     try {
+      final baseName = filename.contains('/')
+          ? filename.substring(filename.lastIndexOf('/') + 1)
+          : filename;
       final files = await _client.storage.from(bucket).list(
-            searchOptions: SearchOptions(search: filename, limit: 5),
+            searchOptions: SearchOptions(search: baseName, limit: 10),
           );
-      return files.any((f) => f.name == filename);
+      return files.any(
+        (f) =>
+            f.name == baseName ||
+            f.name == filename ||
+            filename.endsWith('/${f.name}'),
+      );
     } catch (e) {
       print('[DrugDictionary] list($bucket) failed: $e');
       return false;
     }
   }
+}
 
-  /// 由原始藥名展開出搜尋字：含原文、去劑量單位後的精簡名、空格／符號切詞。
-  ///
-  /// **品質控管**：
-  /// - 長度 < [_minTermLength] 直接丟（`mg`、`錠` 等噪音）
-  /// - 命中 [_stopTerms] 黑名單也丟
-  ///
-  /// 之前沒這層過濾時，英文藥名常切出 `tablets`、`mg`，被當搜尋詞後會誤命中
-  /// 其他剛好有「tablets」在中文／英文 column 的列。
-  static List<String> _searchTerms(String raw) {
-    final result = <String>{};
-    final name = raw.trim();
-    if (name.isEmpty) return result.toList();
-
-    void addTerm(String t) {
-      final clean = t.trim();
-      if (clean.isEmpty) return;
-      // 中文以「字」算長度，英文以字元算；length 對 UTF-16 已夠用。
-      if (clean.length < _minTermLength) return;
-      if (_stopTerms.contains(clean.toLowerCase())) return;
-      result.add(clean);
+/// 修正藥典外部圖床常見 URL 瑕疵（反斜線、空白、protocol 後多斜線）。
+String normalizeExternalImageUrl(String raw) {
+  var url = raw.trim().replaceAll('\\', '/');
+  url = url.replaceAll(RegExp(r'\s+'), '');
+  // `http://host//path` → `http://host/path`
+  url = url.replaceFirstMapped(
+    RegExp(r'^(https?:)//+([^/])'),
+    (m) => '${m.group(1)}//${m.group(2)}',
+  );
+  try {
+    final uri = Uri.parse(url);
+    if (uri.hasScheme && (uri.scheme == 'http' || uri.scheme == 'https')) {
+      return uri.toString();
     }
+  } catch (_) {}
+  return url;
+}
 
-    addTerm(name);
-
-    final withoutDose = name
-        .replaceAll(
-          RegExp(r'[\d.]+\s*(mg|ml|公克|毫克|mcg|μg)?', caseSensitive: false),
-          '',
-        )
-        .trim();
-    if (withoutDose != name) addTerm(withoutDose);
-
-    for (final part in name.split(RegExp(r'[\s、,，+/／]+'))) {
-      addTerm(part);
-    }
-
-    return result.toList();
+/// 複方學名展開：整串 + 各成分（如 "Pioglitazone Metformin" → 兩個成分詞）。
+List<String> expandGenericNameSearchTerms(String raw) {
+  final result = <String>{};
+  result.addAll(expandDrugLookupSearchTerms(raw));
+  for (final part in raw.split(RegExp(r'[\s+／/、,，]+'))) {
+    final p = part.trim();
+    if (p.length >= 4) result.add(p);
   }
+  return result.toList();
+}
+
+/// 由原始藥名展開出搜尋字：含原文、去劑量、括號內外切詞。
+///
+/// 匯出供單元測試；[DrugDictionaryService] 內部查詢亦使用此函式。
+List<String> expandDrugLookupSearchTerms(String raw) {
+  final result = <String>{};
+  final name = raw.trim();
+  if (name.isEmpty) return result.toList();
+
+  void addTerm(String t) {
+    final clean = t.trim();
+    if (clean.isEmpty) return;
+    final minLen = _containsCjk(clean)
+        ? DrugDictionaryService._minCjkTermLength
+        : DrugDictionaryService._minLatinTermLength;
+    if (clean.length < minLen) return;
+    if (DrugDictionaryService._stopTerms.contains(clean.toLowerCase())) {
+      return;
+    }
+    if (RegExp(r'^\d+(\.\d+)?(mg|ml|mcg|μg)$', caseSensitive: false)
+        .hasMatch(clean)) {
+      return;
+    }
+    result.add(clean);
+  }
+
+  addTerm(name);
+
+  final withoutDose = name
+      .replaceAll(
+        RegExp(
+          r'[\d.]+\s*(?:mg|ml|公克|毫克|mcg|μg)|[\d.]+(?:mg|ml|mcg|μg)',
+          caseSensitive: false,
+        ),
+        '',
+      )
+      .trim();
+  if (withoutDose != name) addTerm(withoutDose);
+
+  final splitPattern = RegExp(r'[\s、,，+/／()（）]+');
+  for (final part in name.split(splitPattern)) {
+    addTerm(part);
+  }
+
+  return result.toList();
+}
+
+bool _containsCjk(String text) {
+  return RegExp(r'[\u4e00-\u9fff]').hasMatch(text);
 }
 
 /// 從處方紀錄組出藥典查詢候選藥名（去重、排除占位字）。
@@ -383,10 +654,30 @@ List<String> buildDrugLookupCandidates({
   }
 
   add(medicationName);
-  for (final part in (medicationName ?? '').split(RegExp(r'[、,，/／]'))) {
-    add(part);
+  if (medicationName != kMedicationNamePlaceholder) {
+    for (final part
+        in (medicationName ?? '').split(RegExp(r'[、,，/／()（）]+'))) {
+      add(part);
+    }
   }
 
+  return out;
+}
+
+/// 從處方的 `medications_detail` 取出藥品學名（英文成分名）清單。
+///
+/// 供藥典比對的「弱詞」放寬召回用（不能單獨成立比對）。只有新版掃描寫入的
+/// 列才有 `genericName` 欄位；舊資料回空清單，比對自動退化成寬鬆模式。
+List<String> buildDrugLookupGenericNames(
+  List<Map<String, dynamic>> medicationsDetail,
+) {
+  final out = <String>[];
+  final seen = <String>{};
+  for (final med in medicationsDetail) {
+    final g = med['genericName']?.toString().trim() ?? '';
+    if (g.isEmpty) continue;
+    if (seen.add(g.toLowerCase())) out.add(g);
+  }
   return out;
 }
 

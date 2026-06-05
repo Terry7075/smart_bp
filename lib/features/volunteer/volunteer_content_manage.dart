@@ -9,11 +9,144 @@ const Color _kManageBlue = Color(0xFF1565C0);
 
 /// 志工端：社區學習／客語內容發布管理。
 class VolunteerContentManagePage extends ConsumerWidget {
-  const VolunteerContentManagePage({super.key});
+  const VolunteerContentManagePage({super.key, this.embedded = false});
+
+  /// 嵌入志工端主畫面時為 true，不另包一層 [Scaffold]／[AppBar]。
+  final bool embedded;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncList = ref.watch(learningContentProvider);
+
+    final listBody = asyncList.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '讀取失敗：\n${learningContentFriendlyError(e)}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 20),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                height: 64,
+                child: FilledButton(
+                  onPressed: () =>
+                      ref.read(learningContentProvider.notifier).refresh(),
+                  child: const Text(
+                    '再試一次',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      data: (list) {
+        if (list.isEmpty) {
+          return const Center(
+            child: Text(
+              '尚無內容，請點右下角「+」新增。',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+            ),
+          );
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+          itemCount: list.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            final item = list[index];
+            return Card(
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                title: Text(
+                  item.title,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    '${LearningCategory.label(item.category)} · '
+                    '${LearningContentType.label(item.contentType)}',
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                ),
+                trailing: PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 28),
+                  onSelected: (value) async {
+                    if (value == 'edit') {
+                      _openEditor(context, ref, existing: item);
+                    } else if (value == 'delete') {
+                      final ok = await _confirmDelete(context, item.title);
+                      if (ok && context.mounted) {
+                        await ref
+                            .read(learningContentRepositoryProvider)
+                            .delete(item.id);
+                        ref.invalidate(learningContentProvider);
+                      }
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Text(
+                        '編輯',
+                        style: TextStyle(fontSize: 20),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Text(
+                        '刪除',
+                        style: TextStyle(
+                          fontSize: 20,
+                          color: Color(0xFFC62828),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    final fab = FloatingActionButton.extended(
+      onPressed: () => _openEditor(context, ref),
+      backgroundColor: _kManageBlue,
+      icon: const Icon(Icons.add, size: 28),
+      label: const Text(
+        '新增內容',
+        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+      ),
+    );
+
+    if (embedded) {
+      return RoleGuard(
+        requiredRole: RoleGuardTarget.volunteer,
+        child: Stack(
+          children: [
+            Positioned.fill(child: listBody),
+            Positioned(right: 16, bottom: 16, child: fab),
+          ],
+        ),
+      );
+    }
 
     return RoleGuard(
       requiredRole: RoleGuardTarget.volunteer,
@@ -29,122 +162,8 @@ class VolunteerContentManagePage extends ConsumerWidget {
           ),
           centerTitle: true,
         ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: () => _openEditor(context, ref),
-          backgroundColor: _kManageBlue,
-          icon: const Icon(Icons.add, size: 28),
-          label: const Text(
-            '新增內容',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-        ),
-        body: asyncList.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    '讀取失敗：\n${learningContentFriendlyError(e)}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 20),
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    height: 64,
-                    child: FilledButton(
-                      onPressed: () =>
-                          ref.read(learningContentProvider.notifier).refresh(),
-                      child: const Text(
-                        '再試一次',
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          data: (list) {
-            if (list.isEmpty) {
-              return const Center(
-                child: Text(
-                  '尚無內容，請點右下角「+」新增。',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-                ),
-              );
-            }
-            return ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-              itemCount: list.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final item = list[index];
-                return Card(
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    title: Text(
-                      item.title,
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    subtitle: Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        '${LearningCategory.label(item.category)} · '
-                        '${LearningContentType.label(item.contentType)}',
-                        style: const TextStyle(fontSize: 18),
-                      ),
-                    ),
-                    trailing: PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, size: 28),
-                      onSelected: (value) async {
-                        if (value == 'edit') {
-                          _openEditor(context, ref, existing: item);
-                        } else if (value == 'delete') {
-                          final ok = await _confirmDelete(context, item.title);
-                          if (ok && context.mounted) {
-                            await ref
-                                .read(learningContentRepositoryProvider)
-                                .delete(item.id);
-                            ref.invalidate(learningContentProvider);
-                          }
-                        }
-                      },
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
-                          value: 'edit',
-                          child: Text(
-                            '編輯',
-                            style: TextStyle(fontSize: 20),
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Text(
-                            '刪除',
-                            style: TextStyle(
-                              fontSize: 20,
-                              color: Color(0xFFC62828),
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        ),
+        floatingActionButton: fab,
+        body: listBody,
       ),
     );
   }

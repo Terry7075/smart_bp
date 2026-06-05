@@ -23,6 +23,7 @@ class PrescriptionResult {
     this.isInferred = false,
     this.takeMedicineTimes = const <String>[],
     this.medicationNames = const <String>[],
+    this.genericNames = const <String>[],
     this.pillAppearance,
     this.imagePath,
     this.prescriptionId,
@@ -69,6 +70,10 @@ class PrescriptionResult {
 
   /// OCR 擷取到的藥品名稱（可能多種，已去重）。
   final List<String> medicationNames;
+
+  /// 藥品學名／英文成分名（如 Olmesartan、Metformin），供藥典比對放寬召回用。
+  /// 注意：學名為「弱詞」，只能放寬查詢，不能單獨成立比對（不同藥廠外觀不同）。
+  final List<String> genericNames;
 
   /// 寫入 DB 用：多種藥以「、」串成一行。
   String? get combinedMedicationName =>
@@ -146,6 +151,19 @@ class OcrService {
   OcrService();
 
   final ImagePicker _picker = ImagePicker();
+
+  /// TextRecognizer 為 persistent field：ML Kit 在首次建立時需要載入中文模型，
+  /// 重複使用同一個實例可省去後續掃描的初始化開銷（約 200~500ms）。
+  final _recognizer = TextRecognizer(script: TextRecognitionScript.chinese);
+  bool _recognizerClosed = false;
+
+  /// 釋放底層 ML Kit 資源；widget dispose 時呼叫。
+  Future<void> dispose() async {
+    if (!_recognizerClosed) {
+      _recognizerClosed = true;
+      await _recognizer.close();
+    }
+  }
 
   /// 台灣民國日期：兩到三位民國年 + 年 + 月 + 日，中間允許空白。
   ///
@@ -297,23 +315,26 @@ class OcrService {
   /// 在 Web / 桌面平台呼叫會拋 [UnsupportedError]（ML Kit 沒實作）。
   Future<String> extractRawText(String imagePath) async {
     _ensureSupportedPlatform();
-
-    final recognizer = TextRecognizer(
-      script: TextRecognitionScript.chinese,
-    );
-    try {
-      final input = InputImage.fromFilePath(imagePath);
-      final result = await recognizer.processImage(input);
-      return result.text;
-    } finally {
-      await recognizer.close();
+    if (_recognizerClosed) {
+      throw StateError('OcrService 已釋放，請重建實例。');
     }
+    final input = InputImage.fromFilePath(imagePath);
+    final result = await _recognizer.processImage(input);
+    return result.text;
   }
 
   /// 將原始 OCR 文字解析成 [PrescriptionResult]。對外公開以便撰寫單元測試
   /// （測試時可注入 [now] 凍結「今天」以驗證推算邏輯）。
-  PrescriptionResult parseRawText(String rawText, {DateTime? now}) =>
-      _parsePrescription(rawText, now: now ?? DateTime.now());
+  PrescriptionResult parseRawText(
+    String rawText, {
+    DateTime? now,
+    String? imagePath,
+  }) =>
+      _parsePrescription(
+        rawText,
+        now: now ?? DateTime.now(),
+        imagePath: imagePath,
+      );
 
   /// 雙層擷取邏輯：
   /// 1. 第一優先：直接抓藥單上明確的民國日期。

@@ -13,7 +13,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ShopPage extends ConsumerWidget {
-  const ShopPage({super.key});
+  const ShopPage({super.key, this.embedded = false});
+
+  /// 嵌入志工端主畫面時為 true，不另包一層 [Scaffold]／[AppBar]。
+  final bool embedded;
 
   static const Color _accentBrown = Color(0xFF5D4037);
 
@@ -21,6 +24,23 @@ class ShopPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
     final async = ref.watch(shopProductsProvider);
+    final body = async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text('載入商品資料失敗\n$e', textAlign: TextAlign.center),
+        ),
+      ),
+      data: (products) => _ShopOrderView(
+        products: products,
+        colorScheme: colorScheme,
+        accent: _accentBrown,
+      ),
+    );
+
+    if (embedded) return body;
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: colorScheme.primary,
@@ -31,20 +51,7 @@ class ShopPage extends ConsumerWidget {
           style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
         ),
       ),
-      body: async.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text('載入商品資料失敗\n$e', textAlign: TextAlign.center),
-          ),
-        ),
-        data: (products) => _ShopOrderView(
-          products: products,
-          colorScheme: colorScheme,
-          accent: _accentBrown,
-        ),
-      ),
+      body: body,
     );
   }
 }
