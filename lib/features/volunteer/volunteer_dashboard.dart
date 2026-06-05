@@ -7,10 +7,10 @@ import 'package:smart_bp/features/activities/volunteer_activities_manage.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/health_monitoring/presentation/volunteer_monitoring_tab.dart';
-import 'package:smart_bp/features/shop/presentation/shop_page.dart';
 import 'package:smart_bp/features/volunteer/volunteer_content_manage.dart';
 import 'package:smart_bp/features/volunteer/volunteer_batch_refill_provider.dart';
 import 'package:smart_bp/features/volunteer/volunteer_batch_refill_tab.dart';
+import 'package:smart_bp/features/volunteer/volunteer_shop_orders_page.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task_provider.dart';
 import 'package:smart_bp/features/volunteer/widgets/volunteer_hub_analytics_tab.dart';
@@ -41,7 +41,10 @@ class VolunteerDashboard extends ConsumerStatefulWidget {
 }
 
 class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard> {
-  _VolunteerSection _section = _VolunteerSection.health;
+  /// initialTab == 3（admin 深連結／據點數據）→ 直接進「商城 · 數據總覽」。
+  late _VolunteerSection _section = widget.initialTab == 3
+      ? _VolunteerSection.shop
+      : _VolunteerSection.health;
 
   String get _sectionTitle => switch (_section) {
         _VolunteerSection.health => '志工 · 健康',
@@ -117,7 +120,10 @@ class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard> {
           onRefreshAll: _refreshHealth,
           initialTab: widget.initialTab,
         ),
-      _VolunteerSection.shop => const ShopPage(embedded: true),
+      _VolunteerSection.shop => _VolunteerShopSection(
+          initialView:
+              widget.initialTab == 3 ? _ShopView.analytics : _ShopView.orders,
+        ),
       _VolunteerSection.learning =>
         const VolunteerContentManagePage(embedded: true),
       _VolunteerSection.activities => const VolunteerActivitiesManagePage(),
@@ -223,7 +229,7 @@ class _VolunteerHealthSection extends ConsumerStatefulWidget {
 
   final Future<void> Function() onRefreshAll;
 
-  /// 0=藥單 1=批次代領 2=監測 3=數據總覽
+  /// 0=藥單 1=批次代領 2=監測
   final int initialTab;
 
   @override
@@ -238,8 +244,8 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
   @override
   void initState() {
     super.initState();
-    final tab = widget.initialTab.clamp(0, 3);
-    _tabController = TabController(length: 4, vsync: this, initialIndex: tab);
+    final tab = widget.initialTab.clamp(0, 2);
+    _tabController = TabController(length: 3, vsync: this, initialIndex: tab);
   }
 
   @override
@@ -275,7 +281,6 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
               Tab(text: '藥單協助'),
               Tab(text: '🛵 批次代領'),
               Tab(text: '❤️ 長者監測'),
-              Tab(text: '📊 數據總覽'),
             ],
           ),
         ),
@@ -304,11 +309,119 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
                 child: const VolunteerBatchRefillTab(),
               ),
               const VolunteerMonitoringTab(),
-              const VolunteerHubAnalyticsTab(),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+// ============================================================================
+//  商城分區：上方兩顆切換鈕（代購管理 / 數據總覽）
+// ============================================================================
+
+enum _ShopView { orders, analytics }
+
+/// 志工端「商城」分區：用兩顆按鈕切換「代購管理」與「據點數據總覽」。
+class _VolunteerShopSection extends StatefulWidget {
+  const _VolunteerShopSection({this.initialView = _ShopView.orders});
+
+  final _ShopView initialView;
+
+  @override
+  State<_VolunteerShopSection> createState() => _VolunteerShopSectionState();
+}
+
+class _VolunteerShopSectionState extends State<_VolunteerShopSection> {
+  late _ShopView _view = widget.initialView;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: _ShopViewButton(
+                  label: '代購管理',
+                  icon: Icons.shopping_basket,
+                  selected: _view == _ShopView.orders,
+                  onTap: () => setState(() => _view = _ShopView.orders),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ShopViewButton(
+                  label: '數據總覽',
+                  icon: Icons.bar_chart,
+                  selected: _view == _ShopView.analytics,
+                  onTap: () => setState(() => _view = _ShopView.analytics),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: switch (_view) {
+            _ShopView.orders => const VolunteerShopOrdersPage(embedded: true),
+            _ShopView.analytics => const VolunteerHubAnalyticsTab(),
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _ShopViewButton extends StatelessWidget {
+  const _ShopViewButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected
+          ? _kVolunteerBlue
+          : _kVolunteerBlue.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 24,
+                color: selected ? Colors.white : _kVolunteerBlue,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: selected ? Colors.white : _kVolunteerBlue,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

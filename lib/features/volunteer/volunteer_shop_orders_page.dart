@@ -21,7 +21,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 /// 志工端：全聯／柑仔店參考需求單列表（Supabase）。
 class VolunteerShopOrdersPage extends ConsumerStatefulWidget {
-  const VolunteerShopOrdersPage({super.key});
+  const VolunteerShopOrdersPage({super.key, this.embedded = false});
+
+  /// 嵌入志工端主畫面「商城」分區時為 true，不另包 RoleGuard／Scaffold／AppBar。
+  final bool embedded;
 
   static const Color _volunteerBlue = Color(0xFF1565C0);
   static const Color _backgroundCream = Color(0xFFFFF8E1);
@@ -140,31 +143,7 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
     final async = ref.watch(shopVolunteerOrdersProvider);
     final drafts = ref.watch(volunteerDemandDraftsProvider);
 
-    return RoleGuard(
-      requiredRole: RoleGuardTarget.volunteer,
-      child: Scaffold(
-        backgroundColor: VolunteerShopOrdersPage._backgroundCream,
-        appBar: AppBar(
-          backgroundColor: VolunteerShopOrdersPage._volunteerBlue,
-          foregroundColor: Colors.white,
-          title: const Text(
-            '物資／今日採買',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-          ),
-          centerTitle: true,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, size: 28),
-            onPressed: () => context.pop(),
-          ),
-          actions: [
-            IconButton(
-              tooltip: '重新整理',
-              icon: const Icon(Icons.refresh, size: 28),
-              onPressed: () => ref.invalidate(shopVolunteerOrdersProvider),
-            ),
-          ],
-        ),
-        body: Stack(
+    final body = Stack(
           children: [
             SafeArea(
           child: async.when(
@@ -277,7 +256,35 @@ class _VolunteerShopOrdersPageState extends ConsumerState<VolunteerShopOrdersPag
             // Debug-only Realtime 延遲量測 banner
             if (kDebugMode) const RealtimeLatencyBanner(),
           ],
+        );
+
+    if (widget.embedded) return body;
+
+    return RoleGuard(
+      requiredRole: RoleGuardTarget.volunteer,
+      child: Scaffold(
+        backgroundColor: VolunteerShopOrdersPage._backgroundCream,
+        appBar: AppBar(
+          backgroundColor: VolunteerShopOrdersPage._volunteerBlue,
+          foregroundColor: Colors.white,
+          title: const Text(
+            '物資／今日採買',
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          ),
+          centerTitle: true,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, size: 28),
+            onPressed: () => context.pop(),
+          ),
+          actions: [
+            IconButton(
+              tooltip: '重新整理',
+              icon: const Icon(Icons.refresh, size: 28),
+              onPressed: () => ref.invalidate(shopVolunteerOrdersProvider),
+            ),
+          ],
         ),
+        body: body,
       ),
     );
   }
