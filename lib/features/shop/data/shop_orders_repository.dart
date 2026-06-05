@@ -1,3 +1,4 @@
+import 'package:smart_bp/core/shop_push_invoker.dart';
 import 'package:smart_bp/features/shop/domain/supply_line_snapshot.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
@@ -218,6 +219,12 @@ order_delivery_events(id, order_id, event_type, note, created_at)
       note: '志工已接單，將協助採買',
       createdBy: volunteerId,
     );
+    await _pushOrderUpdateToElder(
+      orderId: orderId,
+      eventType: 'order_accepted',
+      title: '柑仔店需求更新',
+      bodyText: '志工已接單，正在為您採買',
+    );
   }
 
   /// 配送中繼步驟（不改 orders.status，只加事件）。
@@ -232,6 +239,13 @@ order_delivery_events(id, order_id, event_type, note, created_at)
       eventType: eventType,
       note: note,
       createdBy: uid,
+    );
+    final label = ShopOrderStatus.eventTypeLabel(eventType);
+    await _pushOrderUpdateToElder(
+      orderId: orderId,
+      eventType: 'order_milestone',
+      title: '柑仔店配送更新',
+      bodyText: note != null && note.isNotEmpty ? '$label：$note' : label,
     );
   }
 
@@ -254,6 +268,12 @@ order_delivery_events(id, order_id, event_type, note, created_at)
       eventType: ShopOrderStatus.delivered,
       note: note ?? '物資已送達長輩',
     );
+    await _pushOrderUpdateToElder(
+      orderId: orderId,
+      eventType: 'order_completed',
+      title: '柑仔店需求更新',
+      bodyText: note ?? '物資已送達，感謝您的耐心等候',
+    );
   }
 
   Future<void> reportDeliveryIssue({
@@ -267,6 +287,12 @@ order_delivery_events(id, order_id, event_type, note, created_at)
       orderId: orderId,
       eventType: ShopOrderStatus.issue,
       note: issueNote,
+    );
+    await _pushOrderUpdateToElder(
+      orderId: orderId,
+      eventType: 'order_issue',
+      title: '柑仔店配送通知',
+      bodyText: issueNote,
     );
   }
 
@@ -309,6 +335,42 @@ order_delivery_events(id, order_id, event_type, note, created_at)
       throw AuthException('無法從「$currentStatus」變更為「$newStatus」');
     }
     await _client.from('orders').update({'status': newStatus}).eq('id', orderId);
+    // 取消由狀態變更觸發；接單／完成由專用方法推播，避免重複通知。
+    if (newStatus == 'cancelled') {
+      await _pushOrderUpdateToElder(
+        orderId: orderId,
+        eventType: 'order_status_cancelled',
+        title: '柑仔店需求更新',
+        bodyText:
+            '您的需求單狀態變更為：${ShopOrderStatus.orderStatusLabel(newStatus)}',
+      );
+    }
+  }
+
+  Future<void> _pushOrderUpdateToElder({
+    required String orderId,
+    required String eventType,
+    required String title,
+    required String bodyText,
+  }) async {
+    try {
+      final row = await _client
+          .from('orders')
+          .select('user_id')
+          .eq('id', orderId)
+          .maybeSingle();
+      final elderId = row?['user_id']?.toString();
+      if (elderId == null || elderId.isEmpty) return;
+      await ShopPushInvoker.instance.notifyElderAndFamily(
+        elderUserId: elderId,
+        orderId: orderId,
+        eventType: eventType,
+        title: title,
+        bodyText: bodyText,
+      );
+    } catch (_) {
+      // 推播失敗不阻擋訂單主流程
+    }
   }
 
   Future<List<ShopOrderListRow>> _rowsFromList(

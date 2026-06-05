@@ -1,6 +1,14 @@
 /// 寫入 DB 時若 OCR 抓不到藥名，repository 使用的占位字串。
 const String kMedicationNamePlaceholder = '（藥名請見藥袋或備註）';
 
+/// Vision OCR 流程狀態（對應 `prescriptions.vision_status`）。
+abstract final class VisionStatus {
+  static const String none = 'none';
+  static const String processing = 'processing';
+  static const String completed = 'completed';
+  static const String failed = 'failed';
+}
+
 /// 志工批次代領狀態（對應 `prescriptions.refill_status`）。
 abstract final class RefillStatus {
   static const String none = 'none';
@@ -8,12 +16,30 @@ abstract final class RefillStatus {
   static const String collecting = 'collecting';
   static const String outOfStock = 'out_of_stock';
 
+  /// 長輩已刪除藥單，但志工端仍保留代領提醒。
+  static const String prescriptionDeleted = 'prescription_deleted';
+
   static String label(String status) => switch (status) {
         pendingCollection => '待收健保卡',
         collecting => '領藥中',
         outOfStock => '缺藥調貨中',
+        prescriptionDeleted => '藥單已刪除',
         _ => '一般',
       };
+
+  /// 是否為進行中的代領（可收證、領藥）。
+  static bool isActionableRefill(String status) =>
+      status == pendingCollection ||
+      status == collecting ||
+      status == outOfStock;
+
+  /// 長輩端已刪除藥單，志工需再次確認。
+  static bool isPrescriptionDeletedByElder(String status) =>
+      status == prescriptionDeleted;
+
+  /// 刪除藥單時是否應保留志工代領列（軟保留）。
+  static bool shouldRetainVolunteerRefillOnDelete(String status) =>
+      status != none && status != prescriptionDeleted;
 }
 
 /// 長輩端「藥單 / 提醒管理」用的一筆紀錄（對應 Supabase `prescriptions`）。
@@ -32,6 +58,7 @@ class PrescriptionRecord {
     this.medicationsDetail = const [],
     this.refillStatus = RefillStatus.none,
     this.hasHealthCard = false,
+    this.visionStatus = VisionStatus.none,
     required this.status,
     required this.source,
     required this.createdAt,
@@ -66,6 +93,9 @@ class PrescriptionRecord {
   /// 志工是否已收妥該長輩健保卡與慢箋正本。
   final bool hasHealthCard;
 
+  /// `none` | `processing` | `completed` | `failed`
+  final String visionStatus;
+
   /// `active` | `cancelled` | `pending_verification` | …
   final String status;
 
@@ -77,6 +107,16 @@ class PrescriptionRecord {
   bool get isActive => status == 'active';
 
   bool get isPendingVerification => status == 'pending_verification';
+
+  /// 長輩「我的藥單」可見的有效藥單。
+  ///
+  /// 排除 Vision 占位（processing）與辨識失敗（failed）列——這些不應出現在
+  /// 使用中清單，即使 DB 因 race / RLS 仍留著 `status='active'`。
+  /// 已 cancelled（含長輩刪除代領藥單後軟保留給志工）也不顯示。
+  bool get isManageablePrescription =>
+      isActive &&
+      visionStatus != VisionStatus.processing &&
+      visionStatus != VisionStatus.failed;
 
   /// 可顯示給長輩的藥名（排除 DB 占位）。
   String? get displayMedicationName {
@@ -122,6 +162,7 @@ class PrescriptionRecord {
       medicationsDetail: _parseMedicationsDetail(map['medications_detail']),
       refillStatus: (map['refill_status'] as String?) ?? RefillStatus.none,
       hasHealthCard: map['has_health_card'] as bool? ?? false,
+      visionStatus: (map['vision_status'] as String?) ?? VisionStatus.none,
       status: (map['status'] as String?) ?? 'active',
       source: (map['source'] as String?) ?? 'ocr',
       createdAt:
@@ -142,6 +183,7 @@ class PrescriptionRecord {
       if (pillAppearance != null) 'pill_appearance': pillAppearance,
       'refill_status': refillStatus,
       'has_health_card': hasHealthCard,
+      'vision_status': visionStatus,
       'status': status,
       'source': source,
       'created_at': createdAt.toUtc().toIso8601String(),
@@ -162,6 +204,7 @@ class PrescriptionRecord {
     List<Map<String, dynamic>>? medicationsDetail,
     String? refillStatus,
     bool? hasHealthCard,
+    String? visionStatus,
     String? status,
     String? source,
     DateTime? createdAt,
@@ -180,6 +223,7 @@ class PrescriptionRecord {
       medicationsDetail: medicationsDetail ?? this.medicationsDetail,
       refillStatus: refillStatus ?? this.refillStatus,
       hasHealthCard: hasHealthCard ?? this.hasHealthCard,
+      visionStatus: visionStatus ?? this.visionStatus,
       status: status ?? this.status,
       source: source ?? this.source,
       createdAt: createdAt ?? this.createdAt,

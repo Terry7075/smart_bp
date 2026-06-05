@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:smart_bp/features/assistant/data/assistant_shop_navigation.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_nav_action.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_reply.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_shop_intent.dart';
@@ -8,6 +9,7 @@ import 'package:smart_bp/features/assistant/domain/assistant_snapshot.dart';
 import 'package:smart_bp/features/shared/offline_queue/offline_queue.dart';
 import 'package:smart_bp/features/shop/data/demand_records_repository.dart';
 import 'package:smart_bp/features/shop/data/elder_supply_templates.dart';
+import 'package:smart_bp/features/shop/data/product_normalization_engine.dart';
 import 'package:smart_bp/features/shop/data/supply_dialogue_service.dart';
 import 'package:smart_bp/features/shop/domain/supply_line_snapshot.dart';
 import 'package:smart_bp/features/shop/data/price_references_repository.dart';
@@ -24,9 +26,9 @@ class AssistantShopActionService {
   final DemandRecordsRepository _demandRepo;
   final PriceReferencesRepository _priceRepo;
 
-  static const _navShop = AssistantNavAction(label: '前往柑仔店', route: '/shop');
-  static const _navShopOrders =
-      AssistantNavAction(label: '查看需求紀錄', route: '/shop/orders');
+  static const _navShop = AssistantShopNavigation.browse;
+  static const _navShopSubmit = AssistantShopNavigation.submit;
+  static const _navShopOrders = AssistantShopNavigation.orders;
   static AssistantNavAction _navPrices([String? searchQuery]) {
     final q = searchQuery?.trim();
     if (q == null || q.isEmpty) {
@@ -105,7 +107,8 @@ class AssistantShopActionService {
     ShopIntentSlots? slots,
   ) async {
     final lines = slots?.lines ?? const [];
-    const supplyDialogue = SupplyDialogueService();
+    final supplyDialogue = SupplyDialogueService();
+    final pne = ProductNormalizationEngine();
     if (lines.length == 1) {
       final pending = supplyDialogue.pendingFromDemandLine(
         lines.first.productName,
@@ -125,6 +128,22 @@ class AssistantShopActionService {
       final snapshots = <SupplyLineSnapshot>[];
       final legacy = <({String productName, int quantity, String? productId, double? unitPrice})>[];
       for (final l in lines) {
+        final utterance = '${l.productName} ${l.quantity}';
+        final canonical = pne.normalize(utterance);
+        if (canonical.needsBrandClarification) {
+          final pending = supplyDialogue.pendingFromDemandLine(
+            l.productName,
+            l.quantity,
+          );
+          if (pending != null) {
+            return supplyDialogue.brandAskReplyFor(pending);
+          }
+        }
+        final fromPne = pne.toSnapshot(canonical);
+        if (fromPne != null && canonical.hasBrand) {
+          snapshots.add(fromPne);
+          continue;
+        }
         final cat = ElderSupplyTemplates.findCategoryByKeyword(l.productName);
         final opt = cat != null
             ? ElderSupplyTemplates.findOption(cat, l.productName)
@@ -164,8 +183,8 @@ class AssistantShopActionService {
           .join('、');
       return AssistantReply(
         text: '好，已幫您記在需求草稿裡：$summary。\n'
-            '要正式送出請到柑仔店確認，或跟我說「我剛剛說要買什麼」查看。',
-        actions: const [_navShop, _navShopOrders],
+            '請到柑仔店按「送出給志工」，或跟我說「我剛剛說要買什麼」查看。',
+        actions: const [_navShopSubmit, _navShopOrders],
       );
     } catch (e) {
       // 網路失敗 → 寫入離線佇列
@@ -178,7 +197,7 @@ class AssistantShopActionService {
         );
       }
       return AssistantReply(
-        text: '目前無法連線，已離線暫存您的需求。\n網路恢復後會自動送出，請放心。',
+        text: '目前無法連線，已離線暫存您的需求。\n連線恢復後會寫入草稿，請到柑仔店按「送出給志工」。',
         actions: const [_navShop],
       );
     }

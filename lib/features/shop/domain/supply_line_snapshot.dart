@@ -1,3 +1,11 @@
+bool _isUuid(String? s) {
+  if (s == null || s.isEmpty) return false;
+  return RegExp(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    caseSensitive: false,
+  ).hasMatch(s);
+}
+
 /// 代購明細寫入 DB 時的結構化快照（志工採買、後台統計）。
 final class SupplyLineSnapshot {
   const SupplyLineSnapshot({
@@ -16,6 +24,10 @@ final class SupplyLineSnapshot {
     this.pxSearchKeyword,
     this.imageUrl,
     this.referenceNote,
+    this.categoryId,
+    this.brandId,
+    this.productItemId,
+    this.normalizeConfidence,
   });
 
   final String productId;
@@ -33,6 +45,21 @@ final class SupplyLineSnapshot {
   final String? pxSearchKeyword;
   final String? imageUrl;
   final String? referenceNote;
+  final String? categoryId;
+  final String? brandId;
+  final String? productItemId;
+  final double? normalizeConfidence;
+
+  /// 從 `product_id`（如 `item:<uuid>`）或欄位解析標準品項 UUID。
+  static String? parseProductItemId(String? productId, {String? explicit}) {
+    if (_isUuid(explicit)) return explicit;
+    if (productId == null || productId.isEmpty) return null;
+    if (productId.startsWith('item:')) {
+      final id = productId.substring(5);
+      return _isUuid(id) ? id : null;
+    }
+    return _isUuid(productId) ? productId : null;
+  }
 
   Map<String, dynamic> toInsertMap() => {
         'product_id': productId,
@@ -55,6 +82,15 @@ final class SupplyLineSnapshot {
         if (imageUrl != null && imageUrl!.isNotEmpty) 'image_url': imageUrl,
         if (referenceNote != null && referenceNote!.isNotEmpty)
           'reference_note': referenceNote,
+        if (_isUuid(categoryId)) 'category_id': categoryId,
+        if (_isUuid(brandId)) 'brand_id': brandId,
+        if (_isUuid(parseProductItemId(productId, explicit: productItemId)))
+          'product_item_id':
+              parseProductItemId(productId, explicit: productItemId),
+        if (normalizeConfidence != null)
+          'normalize_confidence': normalizeConfidence,
+        'normalized_at': DateTime.now().toUtc().toIso8601String(),
+        'fulfillment_status': 'pending',
       };
 
   factory SupplyLineSnapshot.fromItemMap(Map<String, dynamic> m) {
@@ -74,6 +110,10 @@ final class SupplyLineSnapshot {
       pxSearchKeyword: m['px_search_keyword']?.toString(),
       imageUrl: m['image_url']?.toString(),
       referenceNote: m['reference_note']?.toString(),
+      categoryId: m['category_id']?.toString(),
+      brandId: m['brand_id']?.toString(),
+      productItemId: m['product_item_id']?.toString(),
+      normalizeConfidence: (m['normalize_confidence'] as num?)?.toDouble(),
     );
   }
 }

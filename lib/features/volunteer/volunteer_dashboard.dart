@@ -3,13 +3,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_bp/features/activities/volunteer_activities_manage.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/health_monitoring/presentation/volunteer_monitoring_tab.dart';
+import 'package:smart_bp/features/shop/presentation/shop_page.dart';
+import 'package:smart_bp/features/volunteer/volunteer_content_manage.dart';
 import 'package:smart_bp/features/volunteer/volunteer_batch_refill_provider.dart';
 import 'package:smart_bp/features/volunteer/volunteer_batch_refill_tab.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task_provider.dart';
+import 'package:smart_bp/features/volunteer/widgets/volunteer_hub_analytics_tab.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -22,31 +26,31 @@ const Color _kBackgroundCream = Color(0xFFFFF8E1);
 /// 被洩漏後可以一直被取用。
 const int _kPhotoSignedUrlSeconds = 60 * 60;
 
-/// 志工任務儀表板（藥單協助 + 批次代領）。
+/// 志工端主畫面分區。
+enum _VolunteerSection { health, shop, learning, activities }
+
+/// 志工任務儀表板（健康／商城／學習／活動）。
 class VolunteerDashboard extends ConsumerStatefulWidget {
-  const VolunteerDashboard({super.key});
+  const VolunteerDashboard({super.key, this.initialTab = 0});
+
+  /// 0=藥單 1=批次代領 2=監測 3=數據總覽
+  final int initialTab;
 
   @override
   ConsumerState<VolunteerDashboard> createState() => _VolunteerDashboardState();
 }
 
-class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
+class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard> {
+  _VolunteerSection _section = _VolunteerSection.health;
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-  }
+  String get _sectionTitle => switch (_section) {
+        _VolunteerSection.health => '志工 · 健康',
+        _VolunteerSection.shop => '志工 · 商城',
+        _VolunteerSection.learning => '志工 · 學習',
+        _VolunteerSection.activities => '志工 · 活動',
+      };
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _refreshAll() async {
+  Future<void> _refreshHealth() async {
     await Future.wait([
       ref.read(volunteerTasksProvider.notifier).refresh(),
       Future<void>.delayed(Duration.zero, () {
@@ -57,8 +61,6 @@ class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard>
 
   @override
   Widget build(BuildContext context) {
-    final asyncTasks = ref.watch(volunteerTasksProvider);
-
     return RoleGuard(
       requiredRole: RoleGuardTarget.volunteer,
       child: Scaffold(
@@ -66,28 +68,19 @@ class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard>
         appBar: AppBar(
           backgroundColor: _kVolunteerBlue,
           foregroundColor: Colors.white,
-          title: const Text(
-            '志工任務儀表板',
-            style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+          title: Text(
+            _sectionTitle,
+            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
           ),
           centerTitle: true,
           toolbarHeight: 72,
           actions: [
-            IconButton(
-              tooltip: '重新整理',
-              icon: const Icon(Icons.refresh, size: 28),
-              onPressed: _refreshAll,
-            ),
-            IconButton(
-              tooltip: '物資／柑仔店代購',
-              icon: const Icon(Icons.storefront, size: 28),
-              onPressed: () => context.push('/volunteer/shop-orders'),
-            ),
-            IconButton(
-              tooltip: '學習內容管理',
-              icon: const Icon(Icons.library_add_outlined, size: 28),
-              onPressed: () => context.push('/volunteer-content-manage'),
-            ),
+            if (_section == _VolunteerSection.health)
+              IconButton(
+                tooltip: '重新整理',
+                icon: const Icon(Icons.refresh, size: 28),
+                onPressed: _refreshHealth,
+              ),
             IconButton(
               tooltip: '個人資料',
               icon: const Icon(Icons.person_outline, size: 28),
@@ -100,32 +93,199 @@ class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard>
             ),
             const SizedBox(width: 4),
           ],
-          bottom: TabBar(
+        ),
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _VolunteerSectionNav(
+                selected: _section,
+                onSelected: (s) => setState(() => _section = s),
+              ),
+              Expanded(child: _buildSectionBody()),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionBody() {
+    return switch (_section) {
+      _VolunteerSection.health =>
+        _VolunteerHealthSection(
+          onRefreshAll: _refreshHealth,
+          initialTab: widget.initialTab,
+        ),
+      _VolunteerSection.shop => const ShopPage(embedded: true),
+      _VolunteerSection.learning =>
+        const VolunteerContentManagePage(embedded: true),
+      _VolunteerSection.activities => const VolunteerActivitiesManagePage(),
+    };
+  }
+}
+
+/// 上方四個分區按鈕：健康、商城、學習、活動。
+class _VolunteerSectionNav extends StatelessWidget {
+  const _VolunteerSectionNav({
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final _VolunteerSection selected;
+  final ValueChanged<_VolunteerSection> onSelected;
+
+  static const _items = <(_VolunteerSection, String, IconData)>[
+    (_VolunteerSection.health, '健康', Icons.favorite),
+    (_VolunteerSection.shop, '商城', Icons.storefront),
+    (_VolunteerSection.learning, '學習', Icons.menu_book),
+    (_VolunteerSection.activities, '活動', Icons.event),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      child: Row(
+        children: [
+          for (var i = 0; i < _items.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            Expanded(
+              child: _SectionNavButton(
+                label: _items[i].$2,
+                icon: _items[i].$3,
+                selected: selected == _items[i].$1,
+                onTap: () => onSelected(_items[i].$1),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionNavButton extends StatelessWidget {
+  const _SectionNavButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? _kVolunteerBlue : _kVolunteerBlue.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 28,
+                color: selected ? Colors.white : _kVolunteerBlue,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: selected ? Colors.white : _kVolunteerBlue,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 健康分區：藥單協助、批次代領、長者監測。
+class _VolunteerHealthSection extends ConsumerStatefulWidget {
+  const _VolunteerHealthSection({
+    required this.onRefreshAll,
+    this.initialTab = 0,
+  });
+
+  final Future<void> Function() onRefreshAll;
+
+  /// 0=藥單 1=批次代領 2=監測 3=數據總覽
+  final int initialTab;
+
+  @override
+  ConsumerState<_VolunteerHealthSection> createState() =>
+      _VolunteerHealthSectionState();
+}
+
+class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    final tab = widget.initialTab.clamp(0, 3);
+    _tabController = TabController(length: 4, vsync: this, initialIndex: tab);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final asyncTasks = ref.watch(volunteerTasksProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Material(
+          color: _kVolunteerBlue.withValues(alpha: 0.06),
+          child: TabBar(
             controller: _tabController,
-            indicatorColor: Colors.white,
+            indicatorColor: _kVolunteerBlue,
             indicatorWeight: 3,
+            labelColor: _kVolunteerBlue,
+            unselectedLabelColor: Colors.black54,
             labelStyle: const TextStyle(
-              fontSize: 18,
+              fontSize: 17,
               fontWeight: FontWeight.bold,
             ),
             unselectedLabelStyle: const TextStyle(
-              fontSize: 17,
+              fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
             tabs: const [
               Tab(text: '藥單協助'),
-              Tab(text: '🛵 批次代領任務'),
+              Tab(text: '🛵 批次代領'),
               Tab(text: '❤️ 長者監測'),
+              Tab(text: '📊 數據總覽'),
             ],
           ),
         ),
-        body: SafeArea(
+        Expanded(
           child: TabBarView(
             controller: _tabController,
             children: [
               RefreshIndicator(
                 color: _kVolunteerBlue,
-                onRefresh: _refreshAll,
+                onRefresh: widget.onRefreshAll,
                 child: asyncTasks.when(
                   loading: () => const _LoadingView(),
                   error: (e, _) => _ErrorView(
@@ -140,20 +300,21 @@ class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard>
               ),
               RefreshIndicator(
                 color: _kVolunteerBlue,
-                onRefresh: _refreshAll,
+                onRefresh: widget.onRefreshAll,
                 child: const VolunteerBatchRefillTab(),
               ),
               const VolunteerMonitoringTab(),
+              const VolunteerHubAnalyticsTab(),
             ],
           ),
         ),
-      ),
+      ],
     );
   }
 }
 
 // ============================================================================
-//  Loading / Error / Empty
+//  健康分區：Loading / Error / Empty
 // ============================================================================
 
 class _LoadingView extends StatelessWidget {

@@ -88,7 +88,7 @@ Dashboard → **Project Settings** → **Edge Functions** → **Secrets**：
 | Name | Value |
 |------|--------|
 | `GEMINI_API_KEY` | 你的 [Google AI Studio](https://aistudio.google.com/apikey) API Key |
-| `GEMINI_MODEL`（選填） | 預設 `gemini-2.0-flash`；勿再用已下架的 `gemini-1.5-flash` |
+| `GEMINI_MODEL`（選填） | 預設 `gemini-2.5-flash` |
 
 （`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY` 通常已自動注入，無需手動加。）
 
@@ -116,6 +116,86 @@ Dashboard → **Edge Functions** → **Deploy a new function**：
 
 - `npm install supabase` 在 `C:\Users\ASUS\` **不會**讓 Flutter 專案自動能用 CLI。
 - 若要在專案用 npm 腳本，應在 `smart_bp` 目錄並用 **Scoop 版 CLI**，不要依賴 npm 的 `supabase` 包。
+
+---
+
+## 物資子系統 — 完整 SQL 執行順序（新環境必讀）
+
+在 [Supabase SQL Editor](https://supabase.com/dashboard/project/ntufhwqxaidwnelorcsv/sql/new) **整檔貼上並 Run，一次一支、不可跳過**。
+
+### 階段 A：基礎 schema（`supabase/` 根目錄，不在 `migrations/`）
+
+| 順序 | 檔案 | 說明 |
+|------|------|------|
+| A1 | [`orders_schema.sql`](orders_schema.sql) | `orders`／`order_items` 本體與 RLS（柑仔店正式單） |
+| A2 | [`chapter5_shop_assistant_schema.sql`](chapter5_shop_assistant_schema.sql) | `demand_records`、`price_references`、`location_points` 等 |
+| A3 | [`order_line_items_shopping_snapshot.sql`](order_line_items_shopping_snapshot.sql) | 採買快照欄位（今日清單 RPC 依賴） |
+| A4 | [`graduation_enhancement_schema.sql`](graduation_enhancement_schema.sql) | `family_elder_links`、家屬角色 RLS（家屬 Demo 必跑） |
+| A5 | [`assistant_chat_schema.sql`](assistant_chat_schema.sql) | 小幫手對話歷史（選做，未跑則歷史功能不可用） |
+
+> 若專案已跑過用藥等 migration，**勿重跑** `supabase/migrations/` 內既有檔；僅補跑上方 A 段缺漏與下方 B 段物資遷移。
+
+### 階段 B：`migrations/` 物資遷移（v2／v3）
+
+| 順序 | 檔案 |
+|------|------|
+| B1 | `20260601000000_product_catalog_and_intelligence.sql` — 建立 `product_categories` 等表 |
+| B2 | `20260601500000_product_catalog_seed.sql` — 種子分類／品牌（`20260602` 的 `product_items` 依賴此資料） |
+| B3 | `20260602000000_group_buy_collaboration.sql` — SKU、澄清、今日清單、履行 RPC |
+| B4 | `20260603000000_volunteer_hub_unified_role.sql` — 志工／admin 合一 |
+| B5 | `20260604000000_demand_records_submitted_at.sql` — 與 B3 開頭相同，可省略或重跑（idempotent） |
+| B6 | `20260605000000_shop_backend_gaps.sql` — `client_request_id` 冪等鍵、`recommend_brands` GRANT |
+| B7 | `20260606000000_android_fcm_tokens.sql` — `device_tokens` 複合索引（Android FCM 查詢） |
+| B8 | `20260607000000_shop_realtime_publication.sql` — 冪等加入 `orders`／`demand_records`／`demand_record_items` Realtime |
+
+### 階段 C：Demo 種子（選做但口試建議）
+
+| 順序 | 檔案 | 說明 |
+|------|------|------|
+| C1 | [`price_references_demo_seed.sql`](price_references_demo_seed.sql) | 查價頁／小幫手「衛生紙多少錢」Demo 用 |
+
+**自檢**：執行 [`verify_shop_backend.sql`](verify_shop_backend.sql) 確認 catalog seed、查價種子、Realtime publication、RPC、今日清採買可呼叫。
+
+**易漏（舊檔，內容已併入 B6）**：`demand_record_items_add_client_request_id.sql` 可不再跑。
+
+**常見錯誤**：若直接執行 B3 會出現  
+`ERROR: 42P01: relation "public.product_categories" does not exist`  
+→ 代表尚未執行 **B1**（或執行失敗中斷）。請先跑完 B1，在 Table Editor 確認有 `product_categories` 表，再跑 B2 與 B3。
+
+說明見 `docs/shop_subsystem_architecture_v3.md`（v2 文件已標示為舊版）。
+
+部署 Edge Functions（物資 NLU／推播）：
+
+```bash
+supabase secrets set GEMINI_API_KEY=你的_Gemini_API金鑰
+supabase functions deploy parse_shop_nlu --no-verify-jwt
+supabase functions deploy send_shop_push --no-verify-jwt
+supabase functions deploy assistant_casual_chat --no-verify-jwt
+```
+
+| Function | Secret | 說明 |
+|----------|--------|------|
+| `parse_shop_nlu` | `GEMINI_API_KEY`（必填） | Hybrid NLU 低信心時補強；未部署則僅規則路徑 |
+| `assistant_casual_chat` | `GEMINI_API_KEY`（必填） | 小幫手閒聊；失敗時 App 降級為本地模板 |
+| `send_shop_push` | `FCM_SERVICE_ACCOUNT_JSON`（推薦，FCM v1）或 `FCM_SERVER_KEY`（Legacy，多已停用） | 長輩送單／志工更新訂單後 App invoke；僅 `platform=android` token |
+
+**驗證 Edge**：Dashboard → Edge Functions → `parse_shop_nlu` → Invoke body `{"utterance":"我要買衛生紙"}` 應回 200。
+
+**Realtime**：優先執行 **B8**（`20260607`）自動加入 publication。若仍無即時更新，到 Dashboard → **Database → Replication** 手動確認以下表已啟用：
+
+| 表 | 用途 |
+|----|------|
+| `demand_records` | 志工草稿區、送單狀態 |
+| `demand_record_items` | 品項履行 |
+| `orders` | 長輩／志工訂單列表即時更新 |
+
+未啟用時 App 仍可手動刷新，但 Demo 即時性會失效。
+
+## 志工／據點管理者合一（無獨立管理員 App）
+
+執行 `supabase/migrations/20260603000000_volunteer_hub_unified_role.sql` 後，**志工與 admin 角色**皆進入 `/volunteer-dashboard`；數據總覽為第 4 個 Tab。舊 `/admin/dashboard` 會自動導向該 Tab。
+
+畢專 Demo 建議：新帳號註冊時勾選「我是社區志工」即可，不必另建 admin。
 
 ---
 

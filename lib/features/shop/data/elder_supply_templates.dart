@@ -1,7 +1,7 @@
 import 'package:smart_bp/features/shop/domain/supply_line_snapshot.dart';
 import 'package:smart_bp/features/shop/data/shop_category_images.dart';
 
-/// 長輩代購常用物資模板（與 shop_seed 解耦）。
+/// 長輩代購常用物資模板（Dart 本地常數，不寫 DB）。
 final class SupplyBrandOption {
   const SupplyBrandOption({
     required this.id,
@@ -13,6 +13,7 @@ final class SupplyBrandOption {
     this.imageUrl,
     this.pxSearchKeyword,
     this.sourceUrl,
+    this.isUnspecified = false,
     this.isOther = false,
   });
 
@@ -25,6 +26,9 @@ final class SupplyBrandOption {
   final String? imageUrl;
   final String? pxSearchKeyword;
   final String? sourceUrl;
+
+  /// 無指定品牌（志工代選）。
+  final bool isUnspecified;
   final bool isOther;
 
   String get templateProductId => 'tpl:$id';
@@ -60,8 +64,12 @@ abstract final class ElderSupplyTemplates {
       'https://cdn-icons-png.flaticon.com/128/3529/3529367.png';
   static const _riceIcon =
       'https://cdn-icons-png.flaticon.com/128/2927/2927347.png';
-  static const _noodleIcon =
-      'https://cdn-icons-png.flaticon.com/128/5787/5787008.png';
+  static const _detergentIcon =
+      'https://cdn-icons-png.flaticon.com/128/2920/2920277.png';
+  static const _diaperIcon =
+      'https://cdn-icons-png.flaticon.com/128/2913/2913145.png';
+
+  static const unspecifiedBrandLabel = '無指定品牌';
 
   static const categories = <SupplyCategory>[
     SupplyCategory(
@@ -102,6 +110,15 @@ abstract final class ElderSupplyTemplates {
           pxSearchKeyword: '得意抽取式衛生紙',
         ),
         SupplyBrandOption(
+          id: 'tissue:any',
+          brand: unspecifiedBrandLabel,
+          displayName: '衛生紙（無指定品牌）',
+          spec: '志工代選',
+          unitLabel: '提',
+          isUnspecified: true,
+          imageUrl: _tissueIcon,
+        ),
+        SupplyBrandOption(
           id: 'tissue:other',
           brand: '其他',
           displayName: '其他品牌衛生紙',
@@ -138,6 +155,15 @@ abstract final class ElderSupplyTemplates {
           refPrice: 95,
           imageUrl: _eggIcon,
           pxSearchKeyword: '鄉牧鮮蛋',
+        ),
+        SupplyBrandOption(
+          id: 'egg:any',
+          brand: unspecifiedBrandLabel,
+          displayName: '雞蛋（無指定品牌）',
+          spec: '志工代選',
+          unitLabel: '盒',
+          isUnspecified: true,
+          imageUrl: _eggIcon,
         ),
         SupplyBrandOption(
           id: 'egg:other',
@@ -178,6 +204,25 @@ abstract final class ElderSupplyTemplates {
           pxSearchKeyword: '光泉鮮奶',
         ),
         SupplyBrandOption(
+          id: 'milk:ruisui',
+          brand: '瑞穗',
+          displayName: '瑞穗鮮乳',
+          spec: '936ml',
+          unitLabel: '瓶',
+          refPrice: 82,
+          imageUrl: _milkIcon,
+          pxSearchKeyword: '瑞穗鮮乳',
+        ),
+        SupplyBrandOption(
+          id: 'milk:any',
+          brand: unspecifiedBrandLabel,
+          displayName: '鮮奶（無指定品牌）',
+          spec: '志工代選',
+          unitLabel: '瓶',
+          isUnspecified: true,
+          imageUrl: _milkIcon,
+        ),
+        SupplyBrandOption(
           id: 'milk:other',
           brand: '其他',
           displayName: '其他鮮奶',
@@ -216,6 +261,15 @@ abstract final class ElderSupplyTemplates {
           pxSearchKeyword: '福壽米3kg',
         ),
         SupplyBrandOption(
+          id: 'rice:any',
+          brand: unspecifiedBrandLabel,
+          displayName: '白米（無指定品牌）',
+          spec: '志工代選',
+          unitLabel: '包',
+          isUnspecified: true,
+          imageUrl: _riceIcon,
+        ),
+        SupplyBrandOption(
           id: 'rice:other',
           brand: '其他',
           displayName: '其他白米',
@@ -227,40 +281,116 @@ abstract final class ElderSupplyTemplates {
       ],
     ),
     SupplyCategory(
-      key: 'instant_noodle',
-      label: '泡麵',
-      keywords: ['泡麵', '麵', '速食麵'],
-      defaultUnitLabel: '包',
-      categoryImageCategory: '泡麵/麵食',
+      key: 'detergent',
+      label: '洗衣精',
+      keywords: ['洗衣精', '洗衣液', '洗衣劑'],
+      defaultUnitLabel: '瓶',
+      categoryImageCategory: '清潔用品',
       options: [
         SupplyBrandOption(
-          id: 'noodle:uni',
-          brand: '統一',
-          displayName: '統一肉燥麵',
-          spec: '5入/包',
-          unitLabel: '包',
-          refPrice: 89,
-          imageUrl: _noodleIcon,
-          pxSearchKeyword: '統一肉燥麵',
+          id: 'detergent:blanc',
+          brand: '白蘭',
+          displayName: '白蘭超濃縮洗衣精',
+          spec: '2.7kg',
+          unitLabel: '瓶',
+          refPrice: 199,
+          imageUrl: _detergentIcon,
+          pxSearchKeyword: '白蘭超濃縮洗衣精',
         ),
         SupplyBrandOption(
-          id: 'noodle:weichuan',
-          brand: '味全',
-          displayName: '味全牛肉麵',
-          spec: '5入/包',
-          unitLabel: '包',
-          refPrice: 95,
-          imageUrl: _noodleIcon,
-          pxSearchKeyword: '味全牛肉麵',
+          id: 'detergent:attack',
+          brand: '一匙靈',
+          displayName: '一匙靈抗菌EX洗衣精',
+          spec: '2.4kg',
+          unitLabel: '瓶',
+          refPrice: 219,
+          imageUrl: _detergentIcon,
+          pxSearchKeyword: '一匙靈抗菌EX洗衣精',
         ),
         SupplyBrandOption(
-          id: 'noodle:other',
+          id: 'detergent:maobao',
+          brand: '毛寶',
+          displayName: '毛寶全效抗菌洗衣精',
+          spec: '3.5kg',
+          unitLabel: '瓶',
+          refPrice: 189,
+          imageUrl: _detergentIcon,
+          pxSearchKeyword: '毛寶全效抗菌洗衣精',
+        ),
+        SupplyBrandOption(
+          id: 'detergent:any',
+          brand: unspecifiedBrandLabel,
+          displayName: '洗衣精（無指定品牌）',
+          spec: '志工代選',
+          unitLabel: '瓶',
+          isUnspecified: true,
+          imageUrl: _detergentIcon,
+        ),
+        SupplyBrandOption(
+          id: 'detergent:other',
           brand: '其他',
-          displayName: '其他泡麵',
+          displayName: '其他洗衣精',
+          spec: '請於備註說明',
+          unitLabel: '瓶',
+          isOther: true,
+          imageUrl: _detergentIcon,
+        ),
+      ],
+    ),
+    SupplyCategory(
+      key: 'diaper',
+      label: '成人尿布',
+      keywords: ['成人尿布', '尿布', '尿片', '看護墊'],
+      defaultUnitLabel: '包',
+      categoryImageCategory: '清潔用品',
+      options: [
+        SupplyBrandOption(
+          id: 'diaper:tena',
+          brand: '添寧',
+          displayName: '添寧成人紙尿褲',
+          spec: 'M號 10片',
+          unitLabel: '包',
+          refPrice: 299,
+          imageUrl: _diaperIcon,
+          pxSearchKeyword: '添寧成人紙尿褲',
+        ),
+        SupplyBrandOption(
+          id: 'diaper:lifree',
+          brand: '來復易',
+          displayName: '來復易黏貼式紙尿片',
+          spec: '10片',
+          unitLabel: '包',
+          refPrice: 279,
+          imageUrl: _diaperIcon,
+          pxSearchKeyword: '來復易黏貼式紙尿片',
+        ),
+        SupplyBrandOption(
+          id: 'diaper:drp',
+          brand: '包大人',
+          displayName: '包大人成人紙尿褲',
+          spec: 'M號 10片',
+          unitLabel: '包',
+          refPrice: 289,
+          imageUrl: _diaperIcon,
+          pxSearchKeyword: '包大人成人紙尿褲',
+        ),
+        SupplyBrandOption(
+          id: 'diaper:any',
+          brand: unspecifiedBrandLabel,
+          displayName: '成人尿布（無指定品牌）',
+          spec: '志工代選',
+          unitLabel: '包',
+          isUnspecified: true,
+          imageUrl: _diaperIcon,
+        ),
+        SupplyBrandOption(
+          id: 'diaper:other',
+          brand: '其他',
+          displayName: '其他成人尿布',
           spec: '請於備註說明',
           unitLabel: '包',
           isOther: true,
-          imageUrl: _noodleIcon,
+          imageUrl: _diaperIcon,
         ),
       ],
     ),
@@ -301,7 +431,11 @@ abstract final class ElderSupplyTemplates {
     }
     final lower = t.toLowerCase();
     for (final o in cat.options) {
-      if (o.brand == t || o.displayName.contains(t) || t.contains(o.brand)) {
+      if (o.brand == t ||
+          o.displayName.contains(t) ||
+          t.contains(o.brand) ||
+          (o.isUnspecified &&
+              (t.contains('無指定') || t.contains('都可以') || t == '都可以'))) {
         return o;
       }
       if (lower == o.id.split(':').last) return o;
@@ -319,10 +453,14 @@ abstract final class ElderSupplyTemplates {
     final unit = unitLabel ?? option.unitLabel;
     final note = option.isOther
         ? (referenceNote ?? '長輩指定其他品牌')
-        : referenceNote;
+        : option.isUnspecified
+            ? '志工代選品牌'
+            : referenceNote;
     return SupplyLineSnapshot(
       productId: 'tpl:${category.key}:${option.id.split(':').last}',
-      productName: option.displayName,
+      productName: option.isUnspecified
+          ? '${category.label}（$unspecifiedBrandLabel）'
+          : option.displayName,
       quantity: quantity,
       unitPrice: option.refPrice,
       brand: option.brand,
@@ -350,6 +488,6 @@ abstract final class ElderSupplyTemplates {
     for (final k in cat.keywords) {
       if (n == k || n == cat.label) return true;
     }
-    return n.length <= 6 && cat.keywords.any((k) => n.contains(k));
+    return n.length <= 8 && cat.keywords.any((k) => n.contains(k));
   }
 }

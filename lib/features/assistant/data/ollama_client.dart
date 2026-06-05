@@ -1,6 +1,9 @@
 import 'package:dio/dio.dart';
 import 'package:smart_bp/features/assistant/data/ollama_config.dart';
 
+/// @deprecated 手機 App 不使用本機 Ollama；閒聊改 [AssistantGeminiCasualService]。
+/// 僅保留供 Web 本機開發實驗，正式路徑見 [AssistantReplyOrchestrator]。
+
 /// 呼叫 Ollama Chat API 失敗時拋出。
 class OllamaException implements Exception {
   OllamaException(this.message, {this.cause});

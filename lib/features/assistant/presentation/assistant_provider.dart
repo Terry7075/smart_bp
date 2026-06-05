@@ -10,8 +10,14 @@ import 'package:smart_bp/features/assistant/domain/assistant_chat_session.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_message.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_nav_action.dart';
 import 'package:smart_bp/features/assistant/data/assistant_shop_action_service.dart';
+import 'package:smart_bp/features/assistant/data/assistant_shop_navigation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:smart_bp/features/shop/data/supply_dialogue_service.dart';
 import 'package:smart_bp/features/shop/domain/pending_supply_dialogue.dart';
+import 'package:smart_bp/features/shop/domain/shop_nlu_result.dart';
+import 'package:smart_bp/features/shop/presentation/shop_collaboration_providers.dart';
+import 'package:smart_bp/features/shop/presentation/widgets/recommendation_cards_widget.dart';
+import 'package:smart_bp/features/assistant/domain/assistant_brand_choice.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_history_provider.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -36,6 +42,8 @@ class AssistantChatState {
     this.activeSessionId,
     this.selectedHistoryId,
     this.pendingSupply,
+    this.clarificationSessionId,
+    this.clarificationPartial,
   });
 
   final List<AssistantMessage> messages;
@@ -51,6 +59,10 @@ class AssistantChatState {
   final String? selectedHistoryId;
   final PendingSupplyDialogue? pendingSupply;
 
+  /// Hybrid NLU 多輪澄清（對應 `clarification_sessions`）。
+  final String? clarificationSessionId;
+  final ShopNluResult? clarificationPartial;
+
   bool get isFreshWelcome =>
       !viewingHistory && messages.length <= 1 && !messages.any((m) => m.isUser);
 
@@ -63,6 +75,9 @@ class AssistantChatState {
     bool clearSelectedHistory = false,
     PendingSupplyDialogue? pendingSupply,
     bool clearPendingSupply = false,
+    String? clarificationSessionId,
+    ShopNluResult? clarificationPartial,
+    bool clearClarification = false,
   }) {
     return AssistantChatState(
       messages: messages ?? this.messages,
@@ -75,6 +90,12 @@ class AssistantChatState {
       pendingSupply: clearPendingSupply
           ? null
           : (pendingSupply ?? this.pendingSupply),
+      clarificationSessionId: clearClarification
+          ? null
+          : (clarificationSessionId ?? this.clarificationSessionId),
+      clarificationPartial: clearClarification
+          ? null
+          : (clarificationPartial ?? this.clarificationPartial),
     );
   }
 }
@@ -268,7 +289,7 @@ class AssistantChat extends Notifier<AssistantChatState> {
         conversation: state.messages,
       );
       final userId = _userId;
-      const supplyDialogue = SupplyDialogueService();
+      final supplyDialogue = SupplyDialogueService();
 
       if (state.pendingSupply != null) {
         final pending = state.pendingSupply!;
@@ -284,11 +305,18 @@ class AssistantChat extends Notifier<AssistantChatState> {
         }
         final reply = handled.reply;
         if (reply != null) {
+          final savedDraft =
+              handled.next == null && handled.snapshot != null;
           final assistantMsg = AssistantMessage(
             role: AssistantMessageRole.assistant,
             text: reply.text,
             at: DateTime.now(),
-            actions: reply.actions,
+            actions: reply.brandChoices.isNotEmpty || savedDraft
+                ? AssistantShopNavigation.followUpActions(
+                    extra: reply.actions,
+                    includeOrders: savedDraft,
+                  )
+                : reply.actions,
             intentLabel: '記錄需求',
             brandChoices: reply.brandChoices,
             categoryImageUrl: reply.categoryImageUrl,
@@ -297,7 +325,74 @@ class AssistantChat extends Notifier<AssistantChatState> {
             messages: [...state.messages, assistantMsg],
             loading: false,
             pendingSupply: handled.next,
-            clearPendingSupply: handled.next == null && handled.snapshot != null,
+            clearPendingSupply: savedDraft,
+          );
+          await _persistActiveSession();
+          return;
+        }
+      }
+
+      if (userId != null &&
+          shopPreview.intent == AssistantShopIntent.recordDemand) {
+        final turn =
+            await ref.read(clarificationDialogueServiceProvider).handleUtterance(
+                  userId: userId,
+                  utterance: resolved,
+                  sessionId: state.clarificationSessionId,
+                  existingPartial: state.clarificationPartial,
+                );
+        ref.read(shopNluResultProvider.notifier).setResult(turn.partial);
+        if (turn.snapshot != null) {
+          await ref
+              .read(demandRecordsRepositoryProvider)
+              .addSnapshotLinesResilient(
+                userId: userId,
+                lines: [turn.snapshot!],
+              );
+          final assistantMsg = AssistantMessage(
+            role: AssistantMessageRole.assistant,
+            text: '${turn.reply?.text ?? '已記下「${turn.snapshot!.productName}」。'}\n'
+                '請到柑仔店按「送出給志工」。',
+            at: DateTime.now(),
+            actions: AssistantShopNavigation.followUpActions(includeOrders: true),
+            intentLabel: kDebugMode
+                ? '記錄需求 · NLU ${(turn.partial.confidence * 100).toStringAsFixed(0)}%'
+                : '記錄需求',
+          );
+          state = state.copyWith(
+            messages: [...state.messages, assistantMsg],
+            loading: false,
+            clearClarification: true,
+          );
+          await _persistActiveSession();
+          return;
+        }
+        if (turn.reply != null) {
+          final choices = turn.recommendationCards != null
+              ? RecommendationCardsWidget.toBrandChoices(
+                  turn.recommendationCards!,
+                )
+              : <AssistantBrandChoice>[];
+          final assistantMsg = AssistantMessage(
+            role: AssistantMessageRole.assistant,
+            text: '${turn.reply!.text}\n'
+                '（選好後可到柑仔店按「送出給志工」）',
+            at: DateTime.now(),
+            actions: choices.isNotEmpty
+                ? AssistantShopNavigation.followUpActions(
+                    extra: turn.reply!.actions,
+                  )
+                : turn.reply!.actions,
+            intentLabel: kDebugMode
+                ? '記錄需求 · NLU ${(turn.partial.confidence * 100).toStringAsFixed(0)}%'
+                : '記錄需求',
+            brandChoices: choices,
+          );
+          state = state.copyWith(
+            messages: [...state.messages, assistantMsg],
+            loading: false,
+            clarificationSessionId: turn.sessionId,
+            clarificationPartial: turn.partial,
           );
           await _persistActiveSession();
           return;
@@ -309,9 +404,10 @@ class AssistantChat extends Notifier<AssistantChatState> {
         final ask = supplyDialogue.brandAskReplyFor(started);
         final assistantMsg = AssistantMessage(
           role: AssistantMessageRole.assistant,
-          text: ask.text,
+          text: '${ask.text}\n'
+              '（選好品牌後，可按下方「前往柑仔店送出」）',
           at: DateTime.now(),
-          actions: ask.actions,
+          actions: AssistantShopNavigation.followUpActions(extra: ask.actions),
           intentLabel: '記錄需求',
           brandChoices: ask.brandChoices,
           categoryImageUrl: ask.categoryImageUrl,
@@ -331,18 +427,45 @@ class AssistantChat extends Notifier<AssistantChatState> {
             conversation: state.messages,
             userId: userId,
           );
+      final reply = meta.reply;
+      final brandFollowUp = reply.brandChoices.isNotEmpty;
+      final draftSaved = reply.text.contains('已加入採買清單') ||
+          reply.text.contains('需求草稿');
+      PendingSupplyDialogue? newPending;
+      if (brandFollowUp) {
+        newPending = supplyDialogue.tryStartFromUtterance(resolved);
+        if (newPending == null) {
+          final classified = AssistantShopIntentClassifier.classify(resolved);
+          final lines = classified.slots?.lines ?? const [];
+          if (lines.isNotEmpty) {
+            newPending = supplyDialogue.pendingFromDemandLine(
+              lines.first.productName,
+              lines.first.quantity,
+            );
+          }
+        }
+      }
       final assistantMsg = AssistantMessage(
         role: AssistantMessageRole.assistant,
-        text: meta.reply.text,
+        text: brandFollowUp
+            ? '${reply.text}\n（選好品牌後，可按下方「前往柑仔店送出」）'
+            : reply.text,
         at: DateTime.now(),
-        actions: meta.reply.actions,
+        actions: brandFollowUp || draftSaved
+            ? AssistantShopNavigation.followUpActions(
+                extra: reply.actions,
+                includeOrders: draftSaved && !brandFollowUp,
+              )
+            : reply.actions,
         intentLabel: meta.assistantIntentLabel,
-        brandChoices: meta.reply.brandChoices,
-        categoryImageUrl: meta.reply.categoryImageUrl,
+        brandChoices: reply.brandChoices,
+        categoryImageUrl: reply.categoryImageUrl,
       );
       state = state.copyWith(
         messages: [...state.messages, assistantMsg],
         loading: false,
+        pendingSupply: newPending ?? state.pendingSupply,
+        clearPendingSupply: draftSaved && !brandFollowUp,
       );
       await _persistActiveSession();
     } catch (e) {

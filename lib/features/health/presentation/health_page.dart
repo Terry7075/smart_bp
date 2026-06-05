@@ -170,8 +170,9 @@ class _HealthPrescriptionList extends StatelessWidget {
           prescriptions: list,
           tasks: tasks,
         );
-    final active =
-        list.where((r) => r.status == 'active').toList(growable: false);
+    final active = list
+        .where((r) => r.isManageablePrescription)
+        .toList(growable: false);
     final hasActive = active.isNotEmpty;
     final showEmpty = !hasPending && !hasActive;
 

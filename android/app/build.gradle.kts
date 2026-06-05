@@ -51,6 +51,10 @@ flutter {
 // 額外宣告對應的 bundled 模型依賴，否則呼叫 TextRecognizer(script=chinese)
 // 會拋 NoClassDefFoundError 直接閃退。參考套件 README：
 // https://pub.dev/packages/google_mlkit_text_recognition
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 dependencies {
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
 

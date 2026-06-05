@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_bp/features/shop/domain/fulfillment_status.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
+import 'package:smart_bp/features/shop/presentation/shop_orders_provider.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_realtime_provider.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/order_delivery_timeline.dart';
 
@@ -55,19 +57,21 @@ class ShopOrderDetailPage extends ConsumerWidget {
             body: const Center(child: Text('找不到此訂單', style: TextStyle(fontSize: 20))),
           );
         }
-        return _OrderDetailBody(order: order);
+        return _OrderDetailBody(order: order, orderId: orderId);
       },
     );
   }
 }
 
-class _OrderDetailBody extends StatelessWidget {
-  const _OrderDetailBody({required this.order});
+class _OrderDetailBody extends ConsumerWidget {
+  const _OrderDetailBody({required this.order, required this.orderId});
 
   final ShopOrderListRow order;
+  final String orderId;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final fulfillmentAsync = ref.watch(orderItemFulfillmentProvider(orderId));
     return Scaffold(
       backgroundColor: ShopOrderDetailPage._cream,
       appBar: AppBar(
@@ -178,12 +182,59 @@ class _OrderDetailBody extends StatelessWidget {
                       }(),
                       style: const TextStyle(fontSize: 17),
                     ),
+                    trailing: fulfillmentAsync.when(
+                      data: (rows) {
+                        final match = rows.where(
+                          (r) =>
+                              r.productName == it.productName ||
+                              (it.brand != null && r.brand == it.brand),
+                        );
+                        final status = match.isNotEmpty
+                            ? match.first.fulfillmentStatus
+                            : null;
+                        if (status == null) return null;
+                        return Chip(
+                          label: Text(
+                            status.label,
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                          backgroundColor: _fulfillmentColor(status),
+                        );
+                      },
+                      loading: () => null,
+                      error: (_, __) => null,
+                    ),
                   ),
               ],
             ),
           ),
+          fulfillmentAsync.when(
+            data: (rows) {
+              if (rows.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  '品項採買進度由志工更新；訂單狀態與品項狀態可能不同步，以志工通知為準。',
+                  style: TextStyle(fontSize: 15, color: Colors.grey.shade700, height: 1.4),
+                ),
+              );
+            },
+            loading: () => const SizedBox.shrink(),
+            error: (_, __) => const SizedBox.shrink(),
+          ),
         ],
       ),
     );
+  }
+
+  static Color _fulfillmentColor(ItemFulfillmentStatus status) {
+    return switch (status) {
+      ItemFulfillmentStatus.pending => Colors.orange.shade100,
+      ItemFulfillmentStatus.accepted => Colors.blue.shade100,
+      ItemFulfillmentStatus.purchased => Colors.green.shade100,
+      ItemFulfillmentStatus.delivered => Colors.green.shade200,
+      ItemFulfillmentStatus.substituted => Colors.amber.shade100,
+      ItemFulfillmentStatus.cancelled => Colors.grey.shade300,
+    };
   }
 }

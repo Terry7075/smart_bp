@@ -63,7 +63,7 @@ class RoleGuard extends ConsumerWidget {
 
     return switch (requiredRole) {
       RoleGuardTarget.elder => profile.isElder,
-      RoleGuardTarget.volunteer => profile.isVolunteer,
+      RoleGuardTarget.volunteer => profile.isVolunteerHub,
       RoleGuardTarget.family => profile.isFamily,
       RoleGuardTarget.admin => profile.isAdmin,
     };
@@ -79,7 +79,7 @@ class RoleGuard extends ConsumerWidget {
 
     final shouldBeHere = switch (requiredRole) {
       RoleGuardTarget.elder => profile.isElder,
-      RoleGuardTarget.volunteer => profile.isVolunteer,
+      RoleGuardTarget.volunteer => profile.isVolunteerHub,
       RoleGuardTarget.family => profile.isFamily,
       RoleGuardTarget.admin => profile.isAdmin,
     };
@@ -88,7 +88,7 @@ class RoleGuard extends ConsumerWidget {
     final target = switch (profile.role) {
       Profile.kRoleVolunteer => '/volunteer-dashboard',
       Profile.kRoleFamily => '/family/home',
-      Profile.kRoleAdmin => '/admin/dashboard',
+      Profile.kRoleAdmin => '/volunteer-dashboard?tab=3',
       _ => '/home',
     };
     WidgetsBinding.instance.addPostFrameCallback((_) {

@@ -73,6 +73,29 @@ void main() {
       expect(updated.medicationsDetail, original.medicationsDetail);
       expect(updated.medicationName, '新藥名');
     });
+
+    test('isManageablePrescription 排除 processing / failed', () {
+      final base = PrescriptionRecord(
+        id: 'rx-1',
+        userId: 'u-1',
+        status: 'active',
+        source: 'ocr',
+        createdAt: DateTime(2026, 5, 1),
+      );
+      expect(base.copyWith(visionStatus: VisionStatus.none).isManageablePrescription, isTrue);
+      expect(
+        base.copyWith(visionStatus: VisionStatus.completed).isManageablePrescription,
+        isTrue,
+      );
+      expect(
+        base.copyWith(visionStatus: VisionStatus.processing).isManageablePrescription,
+        isFalse,
+      );
+      expect(
+        base.copyWith(visionStatus: VisionStatus.failed).isManageablePrescription,
+        isFalse,
+      );
+    });
   });
 
   group('elderHasPendingVerification', () {
@@ -166,6 +189,54 @@ void main() {
       expect(groups, hasLength(1));
       expect(groups.first.items, hasLength(2));
       expect(groups.first.pickupDate, DateTime(2026, 6, 5));
+    });
+
+    test('排除 vision failed 的 active 藥單', () {
+      final today = DateTime(2026, 5, 31);
+      final groups = groupPrescriptionsForBatchRefill(
+        prescriptions: [
+          activeRx(id: 'a', pickup: DateTime(2026, 6, 5)),
+          PrescriptionRecord(
+            id: 'bad',
+            userId: 'elder-bad',
+            pickupDate: DateTime(2026, 6, 5),
+            status: 'active',
+            visionStatus: VisionStatus.failed,
+            source: 'ocr',
+            createdAt: DateTime(2026, 1, 1),
+          ),
+        ],
+        elderNamesByUserId: const {'elder-a': '甲', 'elder-bad': '乙'},
+        today: today,
+      );
+      expect(groups, hasLength(1));
+      expect(groups.first.items, hasLength(1));
+      expect(groups.first.items.first.prescription.id, 'a');
+    });
+
+    test('長輩刪除藥單後仍保留在志工代領清單', () {
+      final today = DateTime(2026, 5, 31);
+      final groups = groupPrescriptionsForBatchRefill(
+        prescriptions: [
+          PrescriptionRecord(
+            id: 'deleted-rx',
+            userId: 'elder-x',
+            pickupDate: DateTime(2026, 6, 5),
+            status: 'cancelled',
+            refillStatus: RefillStatus.prescriptionDeleted,
+            source: 'ocr',
+            createdAt: DateTime(2026, 1, 1),
+          ),
+        ],
+        elderNamesByUserId: const {'elder-x': '王阿嬤'},
+        today: today,
+      );
+      expect(groups, hasLength(1));
+      expect(groups.first.items, hasLength(1));
+      expect(
+        groups.first.items.first.prescription.refillStatus,
+        RefillStatus.prescriptionDeleted,
+      );
     });
   });
 

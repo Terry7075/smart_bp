@@ -7,6 +7,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   connectivity_plus
   desktop_webview_window
   file_selector_windows
+  firebase_core
   flutter_inappwebview_windows
   flutter_tts
   permission_handler_windows

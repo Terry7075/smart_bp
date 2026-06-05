@@ -1,4 +1,5 @@
 -- Migration: 為 demand_record_items 加入 client_request_id 冪等鍵
+-- 已併入 migrations/20260605000000_shop_backend_gaps.sql（新環境請跑該檔即可）
 -- 安全可重複執行（IF NOT EXISTS）
 
 -- 1. 加欄位

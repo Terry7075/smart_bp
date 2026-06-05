@@ -73,5 +73,48 @@ void main() {
       expect(candidates, contains('Metformin'));
       expect(candidates, contains('Aspirin'));
     });
+
+    test('括號內外藥名會拆成獨立候選', () {
+      final candidates = buildDrugLookupCandidates(
+        medicationName: '雅脈(Olmesartan)',
+      );
+      expect(candidates, contains('雅脈(Olmesartan)'));
+      expect(candidates, contains('雅脈'));
+      expect(candidates, contains('Olmesartan'));
+    });
+  });
+
+  group('expandDrugLookupSearchTerms', () {
+    test('括號與劑量會切出有效搜尋字', () {
+      final terms = expandDrugLookupSearchTerms(
+        '雅脈 (Olmesartan medoxomil 40mg)',
+      );
+      expect(terms, contains('雅脈'));
+      expect(terms, contains('Olmesartan'));
+      expect(terms, contains('medoxomil'));
+      expect(terms, isNot(contains('40mg')));
+    });
+
+    test('兩字中文藥名會保留', () {
+      final terms = expandDrugLookupSearchTerms('雅脈');
+      expect(terms, contains('雅脈'));
+    });
+  });
+
+  group('expandGenericNameSearchTerms', () {
+    test('複方學名會拆成各成分', () {
+      final terms = expandGenericNameSearchTerms('Pioglitazone Metformin');
+      expect(terms, contains('Pioglitazone'));
+      expect(terms, contains('Metformin'));
+    });
+  });
+
+  group('normalizeExternalImageUrl', () {
+    test('反斜線改為正斜線', () {
+      expect(
+        normalizeExternalImageUrl(r'https://drug.e-ms.com.tw/images\OLOLA.jpg'),
+        'https://drug.e-ms.com.tw/images/OLOLA.jpg',
+      );
+    });
   });
 }

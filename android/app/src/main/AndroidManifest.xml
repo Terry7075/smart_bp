@@ -30,7 +30,8 @@
     <application
         android:label="smart_bp"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -65,6 +66,10 @@
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="ocr_chinese" />
+        <!-- FCM 預設通知頻道（與 NotificationService._orderChannelId 一致） -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="mindu_order_status" />
 
         <!--
             flutter_local_notifications：重新開機 / App 升級後恢復排程的 receiver。
