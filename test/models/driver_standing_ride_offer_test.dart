@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mingde_transport/models/driver_standing_ride_offer.dart';
+import 'package:smart_bp/features/transport/models/driver_standing_ride_offer.dart';
 
 void main() {
   test('DriverStandingRideOffer parses approved offer rows', () {

@@ -1,5 +1,5 @@
 ﻿import 'package:flutter_test/flutter_test.dart';
-import 'package:mingde_transport/models/ride_status.dart';
+import 'package:smart_bp/features/transport/models/ride_status.dart';
 
 void main() {
   group('RideStatusX', () {

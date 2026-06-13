@@ -1,5 +1,5 @@
 ﻿import 'package:flutter_test/flutter_test.dart';
-import 'package:mingde_transport/core/utils/price_calculator.dart';
+import 'package:smart_bp/features/transport/core/utils/price_calculator.dart';
 
 void main() {
   group('calculatePrice', () {

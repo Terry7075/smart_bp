@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mingde_transport/models/profile.dart';
+import 'package:smart_bp/features/transport/models/profile.dart';
 
 void main() {
   group('Profile', () {

@@ -150,6 +150,6 @@ class HybridNluOrchestrator {
     if (data is! Map) return null;
     final inner = data['result'] ?? data['data'] ?? data;
     if (inner is! Map) return null;
-    return ShopNluResult.fromJson(Map<String, dynamic>.from(inner as Map));
+    return ShopNluResult.fromJson(Map<String, dynamic>.from(inner));
   }
 }

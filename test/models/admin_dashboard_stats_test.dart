@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mingde_transport/models/admin_dashboard_stats.dart';
-import 'package:mingde_transport/models/ride_request.dart';
+import 'package:smart_bp/features/transport/models/admin_dashboard_stats.dart';
+import 'package:smart_bp/features/transport/models/ride_request.dart';
 
 void main() {
   test(

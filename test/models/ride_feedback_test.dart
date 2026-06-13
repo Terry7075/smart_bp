@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mingde_transport/models/ride_feedback.dart';
+import 'package:smart_bp/features/transport/models/ride_feedback.dart';
 
 void main() {
   test('RideFeedback distinguishes issue reports from ratings', () {

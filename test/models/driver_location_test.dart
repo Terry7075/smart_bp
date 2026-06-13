@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mingde_transport/models/driver_location.dart';
+import 'package:smart_bp/features/transport/models/driver_location.dart';
 
 void main() {
   test('DriverLocation parses realtime row', () {

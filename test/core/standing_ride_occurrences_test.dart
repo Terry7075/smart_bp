@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mingde_transport/core/utils/standing_ride_occurrences.dart';
+import 'package:smart_bp/features/transport/core/utils/standing_ride_occurrences.dart';
 
 void main() {
   group('generateStandingRideDates', () {

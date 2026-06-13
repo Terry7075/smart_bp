@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mingde_transport/models/standing_ride_request.dart';
+import 'package:smart_bp/features/transport/models/standing_ride_request.dart';
 
 void main() {
   group('StandingRideRequest', () {
