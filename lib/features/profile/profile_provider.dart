@@ -25,6 +25,9 @@ class Profile {
 
   static const String kRoleAdmin = 'admin';
 
+  /// 「司機」角色字串（社區交通模組）。
+  static const String kRoleDriver = 'driver';
+
   final String id;
   final String name;
   final String? phone;
@@ -51,6 +54,9 @@ class Profile {
   bool get isFamily => role == kRoleFamily;
 
   bool get isAdmin => role == kRoleAdmin;
+
+  /// 是否為司機身分（社區交通模組）。
+  bool get isDriver => role == kRoleDriver;
 
   /// 志工端入口：含原 admin（據點管理者併入志工 UI）。
   bool get isVolunteerHub => isVolunteer || isAdmin;

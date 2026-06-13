@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
@@ -53,6 +54,14 @@ class _VideoCardState extends ConsumerState<VideoCard> {
   /// 這張卡的唯一識別：用網址即可（同頁不會有兩筆完全一樣的網址）。
   String get _videoKey => widget.url.trim();
 
+  static void _restorePortraitUi() {
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
+  }
+
   @override
   void dispose() {
     // 若這張卡正在播放就被銷毀（離開頁面、清單重建），先把全域「正在播放」key
@@ -61,6 +70,7 @@ class _VideoCardState extends ConsumerState<VideoCard> {
       ref.read(currentlyPlayingVideoProvider.notifier).stopIf(_videoKey);
     }
     _controller?.dispose();
+    _restorePortraitUi();
     super.dispose();
   }
 
@@ -92,6 +102,7 @@ class _VideoCardState extends ConsumerState<VideoCard> {
   void _stopPlay({bool clearGlobal = true}) {
     _controller?.dispose();
     _controller = null;
+    _restorePortraitUi();
     if (clearGlobal) {
       ref.read(currentlyPlayingVideoProvider.notifier).stopIf(_videoKey);
     }
@@ -133,6 +144,52 @@ class _VideoCardState extends ConsumerState<VideoCard> {
         ? 'https://img.youtube.com/vi/$videoId/hqdefault.jpg'
         : null;
 
+    // 播放中：以 YoutubePlayerBuilder 當「根節點」，全螢幕時套件才能把 player
+    // 從卡片版面抽出、撐满整個螢幕（若把它包在 AspectRatio 內會被父層尺寸限制，
+    // 導致只橫屏卻不铺满）。
+    if (_playing && _controller != null) {
+      return YoutubePlayerBuilder(
+        onEnterFullScreen: () {
+          SystemChrome.setPreferredOrientations([
+            DeviceOrientation.landscapeLeft,
+            DeviceOrientation.landscapeRight,
+          ]);
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+        },
+        onExitFullScreen: _restorePortraitUi,
+        player: YoutubePlayer(
+          controller: _controller!,
+          showVideoProgressIndicator: true,
+          progressIndicatorColor: const Color(0xFFC62828),
+          bottomActions: const [
+            CurrentPosition(),
+            ProgressBar(isExpanded: true),
+            RemainingDuration(),
+            FullScreenButton(),
+          ],
+        ),
+        builder: (context, player) => _buildCard(
+          videoChild: player,
+          showStopButton: true,
+        ),
+      );
+    }
+
+    return _buildCard(
+      videoChild: _PreviewLayer(
+        thumbUrl: thumbUrl,
+        error: _error,
+        onPlay: _startPlay,
+        onOpenExternal: _openInYoutube,
+      ),
+      showStopButton: false,
+    );
+  }
+
+  Widget _buildCard({
+    required Widget videoChild,
+    required bool showStopButton,
+  }) {
     return Card(
       elevation: 2,
       margin: EdgeInsets.zero,
@@ -143,26 +200,9 @@ class _VideoCardState extends ConsumerState<VideoCard> {
         children: [
           AspectRatio(
             aspectRatio: 16 / 9,
-            child: _playing && _controller != null
-                ? YoutubePlayer(
-                    controller: _controller!,
-                    showVideoProgressIndicator: true,
-                    progressIndicatorColor: const Color(0xFFC62828),
-                    bottomActions: const [
-                      CurrentPosition(),
-                      ProgressBar(isExpanded: true),
-                      RemainingDuration(),
-                      FullScreenButton(),
-                    ],
-                  )
-                : _PreviewLayer(
-                    thumbUrl: thumbUrl,
-                    error: _error,
-                    onPlay: _startPlay,
-                    onOpenExternal: _openInYoutube,
-                  ),
+            child: videoChild,
           ),
-          if (_playing)
+          if (showStopButton)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
               child: SizedBox(
