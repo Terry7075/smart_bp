@@ -3,6 +3,7 @@ import 'dart:math' show Random;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
+import 'package:smart_bp/features/health_ocr/pii_redactor.dart';
 import 'package:smart_bp/features/prescription/prescription_provider.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -79,6 +80,10 @@ class VolunteerTaskSubmitter {
       throw ArgumentError('沒有 OCR 文字內容，無法送出任務');
     }
 
+    // 雙重保險：即使呼叫端（HealthScanPage）傳進來的是未遮罩的原文，這裡再
+    // 去識別化一次，確保寫進 volunteer_tasks 的 OCR 文字不含病患 PII。
+    final safeRawText = redactPrescriptionPii(rawOcrText);
+
     final client = _ref.read(_supabaseClientProvider);
     final user = client.auth.currentUser;
     if (user == null) {
@@ -95,9 +100,9 @@ class VolunteerTaskSubmitter {
     }
 
     final taskId = const Uuid().v4();
-    final preview = rawOcrText.trim().length > 800
-        ? '${rawOcrText.trim().substring(0, 800)}…'
-        : rawOcrText.trim();
+    final preview = safeRawText.trim().length > 800
+        ? '${safeRawText.trim().substring(0, 800)}…'
+        : safeRawText.trim();
 
     final payload = VolunteerTask.insertPayload(
       id: taskId,
@@ -106,7 +111,7 @@ class VolunteerTaskSubmitter {
           ? elderName!.trim()
           : (user.userMetadata?['name'] as String?) ?? '社區長輩',
       elderPhone: elderPhone?.trim(),
-      rawOcrText: rawOcrText.trim(),
+      rawOcrText: safeRawText.trim(),
       hospitalName: hospitalName?.trim(),
       photoPath: photoPath,
     );

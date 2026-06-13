@@ -27,10 +27,17 @@ class PrescriptionResult {
     this.pillAppearance,
     this.imagePath,
     this.prescriptionId,
+    this.isLocalFallback = false,
   });
 
   /// 雲端 Vision 流程已寫入的 `prescriptions.id`（確認時勿重複 insert）。
   final String? prescriptionId;
+
+  /// 雲端 Gemini 配額滿時改用本地規則解析的結果。
+  ///
+  /// 此時 [prescriptionId] 會沿用「占位列」的 id（不另開新列），確認時應以
+  /// upsert 寫回同一列完整欄位（藥名/天數/時段…），避免產生重複或幽靈藥單。
+  final bool isLocalFallback;
 
   /// ML Kit OCR 辨識出的整段原始文字（保留原始換行）。
   final String rawText;
@@ -78,6 +85,26 @@ class PrescriptionResult {
   /// 寫入 DB 用：多種藥以「、」串成一行。
   String? get combinedMedicationName =>
       medicationNames.isEmpty ? null : medicationNames.join('、');
+
+  /// 產生變更副本（目前供本地備援沿用占位列 id 用）。
+  PrescriptionResult copyWith({
+    String? prescriptionId,
+    bool? isLocalFallback,
+  }) =>
+      PrescriptionResult(
+        rawText: rawText,
+        hospitalName: hospitalName,
+        pickupDate: pickupDate,
+        medicationDays: medicationDays,
+        isInferred: isInferred,
+        takeMedicineTimes: takeMedicineTimes,
+        medicationNames: medicationNames,
+        genericNames: genericNames,
+        pillAppearance: pillAppearance,
+        imagePath: imagePath,
+        prescriptionId: prescriptionId ?? this.prescriptionId,
+        isLocalFallback: isLocalFallback ?? this.isLocalFallback,
+      );
 
   /// 顯示／畫圖用：外觀欄位或從藥名推斷。
   String get effectivePillAppearance {

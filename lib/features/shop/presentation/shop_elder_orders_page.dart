@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
+import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_realtime_provider.dart';
 
 class ShopElderOrdersPage extends ConsumerWidget {
@@ -17,14 +18,11 @@ class ShopElderOrdersPage extends ConsumerWidget {
     return '${l.year}/${p2(l.month)}/${p2(l.day)} ${p2(l.hour)}:${p2(l.minute)}';
   }
 
-  static String _statusLabel(String status) {
-    return switch (status) {
-      'pending' => '已送出（待處理）',
-      'processing' => '志工處理中',
-      'completed' => '已完成',
-      'cancelled' => '已取消',
-      _ => status,
-    };
+  static String _statusLabel(ShopOrderListRow order) {
+    return ShopOrderStatus.elderOrderStatusLabel(
+      order.status,
+      hasProcuring: order.hasProcuringMilestone,
+    );
   }
 
   @override
@@ -37,7 +35,7 @@ class ShopElderOrdersPage extends ConsumerWidget {
         appBar: AppBar(
           backgroundColor: _green,
           foregroundColor: Colors.white,
-          title: const Text('我的需求單', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          title: const Text('我的需求進度', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
           centerTitle: true,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back, size: 28),
@@ -55,7 +53,7 @@ class ShopElderOrdersPage extends ConsumerWidget {
           child: async.when(
             loading: () => const Center(child: CircularProgressIndicator(color: _green)),
             error: (e, _) => _ErrorView(
-              message: '讀取需求單失敗：$e',
+              message: '讀取需求單失敗，請稍後再試或聯絡志工協助。',
               onRetry: () => ref.invalidate(shopElderOrdersProvider),
             ),
             data: (orders) {
@@ -104,13 +102,13 @@ class _OrderCard extends StatelessWidget {
   const _OrderCard({required this.order, required this.displayNo});
 
   final ShopOrderListRow order;
-  /// 畫面上顯示的簡易序號（1、2、3…），方便長輩口述；完整 UUID 見下方。
+  /// 畫面上顯示的簡易序號（1、2、3…），方便長輩口述。
   final int displayNo;
 
   @override
   Widget build(BuildContext context) {
     final timeText = ShopElderOrdersPage._formatTime(order.createdAt);
-    final statusText = ShopElderOrdersPage._statusLabel(order.status);
+    final statusText = ShopElderOrdersPage._statusLabel(order);
     final totalText = '共 ${order.totalQuantity} 件'
         '${order.totalAmount != null ? '・參考 ${order.totalAmount} 元' : ''}';
 
@@ -189,11 +187,6 @@ class _OrderCard extends StatelessWidget {
                   style: TextStyle(fontSize: 17, color: Colors.grey.shade800),
                 ),
               ),
-            const SizedBox(height: 4),
-            SelectableText(
-              '系統編號（報給志工核對）：${order.id}',
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-            ),
             const SizedBox(height: 10),
             FilledButton.icon(
               onPressed: () => context.push('/shop/orders/${order.id}'),

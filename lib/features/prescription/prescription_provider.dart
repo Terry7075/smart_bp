@@ -171,7 +171,16 @@ class PrescriptionRepository {
     });
   }
 
-  /// OCR 掃描完成後新增一筆（[id] 由呼叫端用 UUID v4 產生，方便預先排通知）。
+  /// OCR 掃描完成後寫入一筆（[id] 由呼叫端用 UUID v4 產生，方便預先排通知）。
+  ///
+  /// 用 **upsert**（以 PK `id` 為衝突鍵）而非 insert：
+  /// - 一般本機解析：[id] 為新 UUID → 等同 insert。
+  /// - 雲端配額滿改走本地備援：[id] 沿用占位列 → 直接覆寫同一列，
+  ///   避免「刪占位列 + 另開新列」造成重複／幽靈藥單。
+  /// - 也順帶防止使用者連點兩次「確認」而插出兩筆。
+  ///
+  /// [visionStatus] 有值時一併寫入（本地備援會傳 completed，把占位列從
+  /// processing 轉為終態，否則會被當成處理中而被清理或卡在轉圈）。
   Future<void> insertOcrPrescription({
     required String id,
     required String userId,
@@ -185,8 +194,9 @@ class PrescriptionRepository {
     String? rawNotes,
     String refillStatus = RefillStatus.none,
     String? photoStoragePath,
+    String? visionStatus,
   }) async {
-    await _client.from('prescriptions').insert({
+    await _client.from('prescriptions').upsert({
       'id': id,
       'user_id': userId,
       'medication_name': _effectiveMedicationName(medicationName),
@@ -201,6 +211,7 @@ class PrescriptionRepository {
       if (rawNotes != null && rawNotes.isNotEmpty) 'notes': rawNotes,
       if (photoStoragePath != null && photoStoragePath.trim().isNotEmpty)
         'photo_storage_path': photoStoragePath.trim(),
+      if (visionStatus != null) 'vision_status': visionStatus,
       'refill_status': refillStatus,
       'status': 'active',
       'source': 'ocr',

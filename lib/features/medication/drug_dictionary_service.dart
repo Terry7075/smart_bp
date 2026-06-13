@@ -238,6 +238,7 @@ class DrugDictionaryService {
     final allRows = forwardRows.isEmpty
         ? reverseRows
         : <Map<String, dynamic>>[...forwardRows, ...reverseRows];
+    _sortRowsForImagePick(allRows);
 
     // 第一階：品牌詞吻合 → 視為「同藥廠相同產品」，顯示其圖（exactBrand=true）。
     final brandUrls = await _collectBrandMatchedImageUrls(allRows, brandTerms);
@@ -376,11 +377,7 @@ class DrugDictionaryService {
       if (list.isEmpty) return const [];
 
       // 若多筆命中，挑「藥典名最短」者優先；解析圖片時仍會依序嘗試每列。
-      list.sort((a, b) {
-        final la = _shorterName(a);
-        final lb = _shorterName(b);
-        return la.compareTo(lb);
-      });
+      _sortRowsForImagePick(list);
       return list;
     } catch (e) {
       print('[DrugDictionary] _forwardSearch error: $e');
@@ -424,11 +421,7 @@ class DrugDictionaryService {
         }
       }
 
-      matches.sort((a, b) {
-        final la = _shorterName(a);
-        final lb = _shorterName(b);
-        return la.compareTo(lb);
-      });
+      _sortRowsForImagePick(matches);
       return matches;
     } catch (e) {
       print('[DrugDictionary] _reverseSearch error: $e');
@@ -449,6 +442,22 @@ class DrugDictionaryService {
     final candidates = [zh, en].where((s) => s.isNotEmpty);
     if (candidates.isEmpty) return 999;
     return candidates.map((s) => s.length).reduce((a, b) => a < b ? a : b);
+  }
+
+  /// 已鏡像到 Supabase Storage 的 `image_url`（`drug-images/...`）優先於外部
+  /// 連結，避免 generic fallback 先命中 404/403 的外部圖床而顯示破圖。
+  static bool _isMirroredStorageUrl(Object? raw) {
+    final v = raw?.toString().trim() ?? '';
+    return v.startsWith('drug-images/');
+  }
+
+  void _sortRowsForImagePick(List<Map<String, dynamic>> rows) {
+    rows.sort((a, b) {
+      final aMirrored = _isMirroredStorageUrl(a['image_url']);
+      final bMirrored = _isMirroredStorageUrl(b['image_url']);
+      if (aMirrored != bMirrored) return aMirrored ? -1 : 1;
+      return _shorterName(a).compareTo(_shorterName(b));
+    });
   }
 
   /// PostgREST `.or()` 值不允許 `, ( ) . " '`；同時清掉 `\` 避免被當逃脫字元。

@@ -80,6 +80,9 @@ class OfflineQueue {
   /// 供 UI 監聽待送數量，ValueListenableBuilder 可直接使用。
   final ValueNotifier<int> pendingNotifier = ValueNotifier(0);
 
+  /// 最近一次 [flush] 成功寫入草稿的筆數；UI 讀取後應歸零。
+  final ValueNotifier<int> lastFlushSyncedCount = ValueNotifier(0);
+
   OfflineQueue._();
 
   static Future<OfflineQueue> init() async {
@@ -130,6 +133,7 @@ class OfflineQueue {
     if (_flushing || _box.isEmpty) return;
     _flushing = true;
     if (kDebugMode) debugPrint('[OfflineQueue] flushing ${_box.length} items');
+    var syncedCount = 0;
     final keys = _box.keys.toList();
     for (final key in keys) {
       final raw = _box.get(key);
@@ -149,12 +153,16 @@ class OfflineQueue {
       final ok = await _sendOne(item);
       if (ok) {
         await _box.delete(key);
+        syncedCount++;
       } else {
         await _box.put(key,
             jsonEncode(item.copyWith(retryCount: item.retryCount + 1).toJson()));
       }
     }
     pendingNotifier.value = _box.length;
+    if (syncedCount > 0) {
+      lastFlushSyncedCount.value = syncedCount;
+    }
     _flushing = false;
   }
 

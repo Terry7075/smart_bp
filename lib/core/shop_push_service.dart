@@ -28,7 +28,9 @@ class ShopPushService {
     if (_initialized) return;
     _initialized = true;
 
-    if (kIsWeb || !Platform.isAndroid) {
+    if (kIsWeb) return;
+
+    if (!Platform.isAndroid) {
       if (kDebugMode && Platform.isIOS) {
         debugPrint(
           'ShopPushService: iOS 使用 Realtime／本機通知，不註冊 FCM',

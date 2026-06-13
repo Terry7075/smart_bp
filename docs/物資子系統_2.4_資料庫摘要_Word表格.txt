@@ -1,0 +1,7 @@
+資料類別	主要資料表	設計摘要
+代購訂單與需求	orders、order_items、demand_records、demand_record_items	長輩需求先以草稿暫存，確認後轉為正式代購單；明細記錄品名、數量與志工履行狀態（已購買、已送達、替代品）
+配送追蹤	order_delivery_events、demand_fulfillment_events	記錄訂單各階段進度與品項狀態變更，供長輩查看配送時間軸、志工事後查核
+商品與價格	product_categories、product_items、product_aliases、price_references	建立標準商品主檔與口語同義詞，協助語音理解；儲存全聯等通路參考價供查價
+智慧小幫手	assistant_chat_sessions、clarification_sessions	儲存對話內容與歷史；語句不完整時暫存澄清過程直至需求釐清
+據點與推播	location_points、location_assets、device_tokens	管理社區據點與據點物資；登記手機推播識別以發送接單與送達通知
+推薦與分析	purchase_events、recommendation_logs	記錄購買與推薦行為，支援個人化三卡推薦與據點營運統計

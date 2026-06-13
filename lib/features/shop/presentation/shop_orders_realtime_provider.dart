@@ -10,7 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 String _orderStatusLabel(String status) => switch (status) {
       'pending' => '待處理',
       'processing' => '志工處理中',
-      'completed' => '已完成，感謝您的耐心等候！',
+      'completed' => '已送達活動中心，感謝您的耐心等候！',
       'cancelled' => '已取消',
       _ => status,
     };
@@ -74,27 +74,6 @@ final shopVolunteerOrdersProvider =
   await for (final _ in client.from('orders').stream(primaryKey: ['id'])) {
     yield await reload();
   }
-});
-
-/// 家屬：綁定長輩的訂單 Realtime。
-final familyElderOrdersStreamProvider = StreamProvider.autoDispose
-    .family<List<ShopOrderListRow>, String>((ref, elderUserId) {
-  ref.watch(authStateChangesProvider);
-  if (elderUserId.isEmpty) {
-    return Stream<List<ShopOrderListRow>>.value(const []);
-  }
-
-  final repo = ref.watch(shopOrdersRepositoryProvider);
-  final client = Supabase.instance.client;
-
-  Future<List<ShopOrderListRow>> reload() =>
-      repo.listOrdersForFamilyLinkedElder(elderUserId: elderUserId);
-
-  return client
-      .from('orders')
-      .stream(primaryKey: ['id'])
-      .eq('user_id', elderUserId)
-      .asyncMap((_) => reload());
 });
 
 /// 單筆訂單詳情（配送時間軸即時更新）。

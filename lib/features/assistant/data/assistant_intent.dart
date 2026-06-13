@@ -24,6 +24,17 @@ abstract final class AssistantIntent {
     return AssistantQueryKind.casual;
   }
 
+  /// 需雲端 Gemini 才有意義的回答（天氣、新聞等），不應降級成 App 帶路模板。
+  static bool needsCloudKnowledge(String question) {
+    final n = _norm(question);
+    if (n.isEmpty) return false;
+    const keys = [
+      '天氣', '下雨', '降雨', '會下', '氣溫', '溫度', '颱風', '冷空氣', '出門',
+      '新聞', '股票', '政治', '總統', '選舉',
+    ];
+    return _contains(n, keys);
+  }
+
   @Deprecated('Use classify()')
   static bool isAppRelated(String question) {
     final k = classify(question);
@@ -50,7 +61,10 @@ abstract final class AssistantIntent {
     ];
     if (_contains(n, mood)) return true;
 
-    const weatherEtc = ['天氣', '新聞', '股票', '政治'];
+    const weatherEtc = [
+      '天氣', '下雨', '降雨', '會下', '氣溫', '溫度', '颱風', '冷空氣',
+      '新聞', '股票', '政治',
+    ];
     if (_contains(n, weatherEtc)) return true;
 
     const greet = ['你好', '嗨', '哈囉', '早安', '午安', '晚安'];

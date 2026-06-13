@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import 'package:smart_bp/features/prescription/prescription_models.dart';
 
 import 'ocr_service.dart';
+import 'pii_redactor.dart';
 
 /// 藥單「OCR + LLM 解讀」服務。
 ///
@@ -54,7 +55,11 @@ class PrescriptionVisionService {
     // ML Kit 用 GPU 加速，多數中文藥袋約 0.5~1 秒即可拿到結果；完全離線。
     final String rawText;
     try {
-      rawText = await _ocrService.extractRawText(picked.path);
+      final rawOcr = await _ocrService.extractRawText(picked.path);
+      // 在「文字離開裝置前」先去識別化：身分證、姓名、生日、電話、病歷號等 PII
+      // 不會送到 Edge Function / Gemini，也不會在後續流程落地到 DB。
+      // 醫院名、藥名、領藥日、服藥時段等解析所需欄位刻意保留。
+      rawText = redactPrescriptionPii(rawOcr);
     } catch (e) {
       // ML Kit 在桌面 / Web 會丟 UnsupportedError；其他例外通常是檔案讀取失敗。
       throw StateError('辨識照片時出了點問題，請再試一次。\n（$e）');
@@ -93,18 +98,25 @@ class PrescriptionVisionService {
         imagePath: picked.path,
       );
     } catch (e) {
-      await _deletePlaceholderRow(prescriptionId);
       // ignore: avoid_print
       print('[PrescriptionVision] 雲端解析失敗: $e');
       if (_isGeminiCapacityError(e)) {
         // Demo／尖峰時段：雲端 AI 配額滿仍可用本地規則解析，避免整條流程卡死。
-      // ignore: avoid_print
-      print('[PrescriptionVision] Gemini 忙碌，改走本地 OCR 解析');
-        return _ocrService.parseRawText(
+        // 重點：沿用同一筆占位列 id（不刪除、不另開新列），確認時以 upsert
+        // 寫回同一列，避免「刪除失敗 + 重新 insert」造成重複／幽靈藥單。
+        // ignore: avoid_print
+        print('[PrescriptionVision] Gemini 忙碌，改走本地 OCR 解析（沿用占位列 $prescriptionId）');
+        final local = _ocrService.parseRawText(
           rawText,
           imagePath: picked.path,
         );
+        return local.copyWith(
+          prescriptionId: prescriptionId,
+          isLocalFallback: true,
+        );
       }
+      // 非配額類錯誤：刪掉占位列避免殘留孤兒列，再把錯誤往上拋給 UI。
+      await _deletePlaceholderRow(prescriptionId);
       rethrow;
     }
   }

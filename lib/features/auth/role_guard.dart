@@ -43,7 +43,16 @@ class RoleGuard extends ConsumerWidget {
 
     _maybeRedirect(context, asyncProfile);
 
-    // profile 載入中 / 錯誤 / null / 角色不符時，不先 render 受保護畫面，
+    // 已登入卻讀不到 profile（RLS / 網路 / 補建失敗）會讓 profileProvider
+    // 進 error；此時顯示錯誤 + 重試，避免永遠卡在轉圈。
+    if (asyncProfile.hasError) {
+      return _RoleGuardErrorView(
+        error: asyncProfile.error!,
+        onRetry: () => ref.read(profileProvider.notifier).refresh(),
+      );
+    }
+
+    // profile 載入中 / null / 角色不符時，不先 render 受保護畫面，
     // 避免長輩／志工儀表板「閃一下」才跳走。
     if (!_mayShowProtectedContent(asyncProfile)) {
       return const _RoleGuardSplash();
@@ -63,9 +72,7 @@ class RoleGuard extends ConsumerWidget {
 
     return switch (requiredRole) {
       RoleGuardTarget.elder => profile.isElder,
-      RoleGuardTarget.volunteer => profile.isVolunteerHub,
-      RoleGuardTarget.family => profile.isFamily,
-      RoleGuardTarget.admin => profile.isAdmin,
+      RoleGuardTarget.volunteer => profile.isVolunteer,
     };
   }
 
@@ -79,25 +86,20 @@ class RoleGuard extends ConsumerWidget {
 
     final shouldBeHere = switch (requiredRole) {
       RoleGuardTarget.elder => profile.isElder,
-      RoleGuardTarget.volunteer => profile.isVolunteerHub,
-      RoleGuardTarget.family => profile.isFamily,
-      RoleGuardTarget.admin => profile.isAdmin,
+      RoleGuardTarget.volunteer => profile.isVolunteer,
     };
     if (shouldBeHere) return;
 
-    final target = switch (profile.role) {
-      Profile.kRoleVolunteer => '/volunteer-dashboard',
-      Profile.kRoleFamily => '/family/home',
-      Profile.kRoleAdmin => '/volunteer-dashboard?tab=3',
-      _ => '/home',
-    };
+    final target = profile.isVolunteer
+        ? '/volunteer-dashboard'
+        : '/home';
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (context.mounted) context.go(target);
     });
   }
 }
 
-enum RoleGuardTarget { elder, volunteer, family, admin }
+enum RoleGuardTarget { elder, volunteer }
 
 /// 角色確認前的占位畫面（與 router 的 splash 風格一致）。
 class _RoleGuardSplash extends StatelessWidget {
@@ -114,6 +116,61 @@ class _RoleGuardSplash extends StatelessWidget {
           child: CircularProgressIndicator(
             strokeWidth: 4,
             color: Color(0xFF2E7D32),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// profile 讀取失敗時的錯誤畫面 + 重試（與 router 的 _DecisionErrorView 一致風格）。
+class _RoleGuardErrorView extends StatelessWidget {
+  const _RoleGuardErrorView({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFF8E1),
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline,
+                    size: 72, color: Color(0xFFBF360C)),
+                const SizedBox(height: 20),
+                Text(
+                  '讀取個人資料失敗：\n$error',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFFBF360C),
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh, size: 28),
+                  label: const Text(
+                    '重新讀取',
+                    style:
+                        TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
