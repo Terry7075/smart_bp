@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/providers.dart';
+import '../../models/fixed_ride_suggestion.dart';
 import '../../models/ride_status.dart';
 
 class ElderHomePage extends ConsumerWidget {
@@ -20,6 +21,8 @@ class ElderHomePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final rides = ref.watch(myRideRequestsProvider);
+    ref.watch(fixedRideAnalysisProvider);
+    final fixedRideSuggestions = ref.watch(myFixedRideSuggestionsProvider);
     final application = ref.watch(currentDriverApplicationProvider).value;
 
     return PopScope(
@@ -64,6 +67,20 @@ class ElderHomePage extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    fixedRideSuggestions.maybeWhen(
+                      data: (suggestions) => suggestions.isEmpty
+                          ? const SizedBox.shrink()
+                          : _FixedRideSuggestionCard(
+                              suggestion: suggestions.first,
+                            ),
+                      orElse: () => const SizedBox.shrink(),
+                    ),
+                    fixedRideSuggestions.maybeWhen(
+                      data: (suggestions) => suggestions.isEmpty
+                          ? const SizedBox.shrink()
+                          : const SizedBox(height: 16),
+                      orElse: () => const SizedBox.shrink(),
+                    ),
                     Text(
                       '目前接送狀態',
                       style: Theme.of(context).textTheme.titleLarge,
@@ -140,6 +157,75 @@ class ElderHomePage extends ConsumerWidget {
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => Center(child: Text('讀取失敗：$error')),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FixedRideSuggestionCard extends ConsumerWidget {
+  const _FixedRideSuggestionCard({required this.suggestion});
+
+  final FixedRideSuggestion suggestion;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.event_repeat,
+                  color: Theme.of(context).colorScheme.primary,
+                  size: 30,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '固定接送候選需求',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '系統發現您經常於每${suggestion.weekdayLabel}${suggestion.displayTime}前往${suggestion.destination}，是否建立固定接送？',
+              style: const TextStyle(fontSize: 18, height: 1.35),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () async {
+                      await ref
+                          .read(fixedRidePredictionServiceProvider)
+                          .confirmFixedRideSuggestion(suggestion.id);
+                      ref.invalidate(myFixedRideSuggestionsProvider);
+                    },
+                    child: const Text('建立固定接送'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      await ref
+                          .read(fixedRidePredictionServiceProvider)
+                          .rejectFixedRideSuggestion(suggestion.id);
+                      ref.invalidate(myFixedRideSuggestionsProvider);
+                    },
+                    child: const Text('稍後再說'),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );

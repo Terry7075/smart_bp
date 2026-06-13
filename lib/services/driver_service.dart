@@ -16,9 +16,11 @@ class DriverService {
         .from('drivers')
         .stream(primaryKey: ['id'])
         .eq('user_id', user.id)
-        .map((rows) => rows.isEmpty
-            ? null
-            : Driver.fromJson(Map<String, dynamic>.from(rows.first)));
+        .map(
+          (rows) => rows.isEmpty
+              ? null
+              : Driver.fromJson(Map<String, dynamic>.from(rows.first)),
+        );
   }
 
   Future<Driver?> fetchCurrentApplication() async {
@@ -43,9 +45,9 @@ class DriverService {
     required int maxPassengers,
   }) async {
     final user = _client.auth.currentUser;
-    if (user == null) throw StateError('User is not signed in.');
+    if (user == null) throw StateError('請先登入');
 
-    await _client.from('drivers').insert({
+    final payload = <String, dynamic>{
       'user_id': user.id,
       'name': name.trim(),
       'phone': phone.trim(),
@@ -53,7 +55,28 @@ class DriverService {
       'car_plate': carPlate.trim(),
       'car_model': carModel.trim().isEmpty ? null : carModel.trim(),
       'max_passengers': maxPassengers,
-    });
+      'approval_status': 'pending',
+      'remaining_seats': maxPassengers,
+      'status': 'offline',
+    };
+
+    try {
+      await _client.from('drivers').insert(payload);
+    } on PostgrestException catch (error) {
+      if (!_isDriverCapacitySchemaMissing(error)) rethrow;
+      final compatiblePayload = Map<String, dynamic>.from(payload)
+        ..remove('remaining_seats')
+        ..remove('status');
+      await _client.from('drivers').insert(compatiblePayload);
+    }
+  }
+
+  bool _isDriverCapacitySchemaMissing(PostgrestException error) {
+    final message = error.message.toLowerCase();
+    return message.contains('remaining_seats') ||
+        (message.contains('status') && message.contains('schema cache')) ||
+        error.code == 'PGRST204' ||
+        error.code == 'PGRST205';
   }
 
   Stream<List<Driver>> watchPendingApplications() {
@@ -110,6 +133,7 @@ class DriverService {
   }) async {
     await _client
         .from('drivers')
-        .update({'approval_status': approvalStatus}).eq('id', driverId);
+        .update({'approval_status': approvalStatus})
+        .eq('id', driverId);
   }
 }

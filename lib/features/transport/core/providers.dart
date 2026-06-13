@@ -6,6 +6,7 @@ import '../models/admin_dashboard_stats.dart';
 import '../models/driver.dart';
 import '../models/driver_location.dart';
 import '../models/driver_standing_ride_offer.dart';
+import '../models/fixed_ride_suggestion.dart';
 import '../models/profile.dart';
 import '../models/ride_feedback.dart';
 import '../models/ride_match.dart';
@@ -15,6 +16,8 @@ import '../services/auth_service.dart';
 import '../services/driver_service.dart';
 import '../services/driver_action_service.dart';
 import '../services/feedback_service.dart';
+import '../services/fixed_ride_prediction_service.dart';
+import '../services/greedy_matching_service.dart';
 import '../services/location_tracking_service.dart';
 import '../services/notification_service.dart';
 import '../services/profile_service.dart';
@@ -22,20 +25,32 @@ import '../services/ride_service.dart';
 import '../services/standing_ride_service.dart';
 
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
-final profileServiceProvider =
-    Provider<ProfileService>((ref) => ProfileService());
+final profileServiceProvider = Provider<ProfileService>(
+  (ref) => ProfileService(),
+);
 final driverServiceProvider = Provider<DriverService>((ref) => DriverService());
 final rideServiceProvider = Provider<RideService>((ref) => RideService());
-final standingRideServiceProvider =
-    Provider<StandingRideService>((ref) => StandingRideService());
-final feedbackServiceProvider =
-    Provider<FeedbackService>((ref) => FeedbackService());
-final driverActionServiceProvider =
-    Provider<DriverActionService>((ref) => DriverActionService());
-final locationTrackingServiceProvider =
-    Provider<LocationTrackingService>((ref) => LocationTrackingService());
-final notificationServiceProvider =
-    Provider<NotificationService>((ref) => NotificationService());
+final greedyMatchingServiceProvider = Provider<GreedyMatchingService>(
+  (ref) => GreedyMatchingService(),
+);
+final fixedRidePredictionServiceProvider = Provider<FixedRidePredictionService>(
+  (ref) => FixedRidePredictionService(),
+);
+final standingRideServiceProvider = Provider<StandingRideService>(
+  (ref) => StandingRideService(),
+);
+final feedbackServiceProvider = Provider<FeedbackService>(
+  (ref) => FeedbackService(),
+);
+final driverActionServiceProvider = Provider<DriverActionService>(
+  (ref) => DriverActionService(),
+);
+final locationTrackingServiceProvider = Provider<LocationTrackingService>(
+  (ref) => LocationTrackingService(),
+);
+final notificationServiceProvider = Provider<NotificationService>(
+  (ref) => NotificationService(),
+);
 
 final authStateChangesProvider = StreamProvider<AuthState>(
   (ref) => ref.watch(authServiceProvider).authStateChanges,
@@ -81,42 +96,66 @@ final todayRidesProvider = StreamProvider<List<RideRequest>>(
 
 final myStandingRideRequestsProvider =
     StreamProvider<List<StandingRideRequest>>(
-  (ref) => ref.watch(standingRideServiceProvider).watchMyStandingRideRequests(),
-);
+      (ref) =>
+          ref.watch(standingRideServiceProvider).watchMyStandingRideRequests(),
+    );
+
+final myFixedRideSuggestionsProvider =
+    StreamProvider<List<FixedRideSuggestion>>(
+      (ref) => ref
+          .watch(fixedRidePredictionServiceProvider)
+          .watchMyPendingSuggestions(),
+    );
+
+final fixedRideAnalysisProvider = FutureProvider<List<FixedRideSuggestion>>((
+  ref,
+) {
+  ref.watch(myRideRequestsProvider);
+  return ref.watch(fixedRidePredictionServiceProvider).analyzeRideHistory();
+});
 
 final approvedDriverStandingRideOffersProvider =
     StreamProvider<List<DriverStandingRideOffer>>(
-  (ref) => ref
-      .watch(standingRideServiceProvider)
-      .watchApprovedDriverStandingRideOffers(),
-);
+      (ref) => ref
+          .watch(standingRideServiceProvider)
+          .watchApprovedDriverStandingRideOffers(),
+    );
 
 final myDriverStandingRideOffersProvider =
     StreamProvider<List<DriverStandingRideOffer>>(
-  (ref) =>
-      ref.watch(standingRideServiceProvider).watchMyDriverStandingRideOffers(),
-);
+      (ref) => ref
+          .watch(standingRideServiceProvider)
+          .watchMyDriverStandingRideOffers(),
+    );
 
 final adminDriverStandingRideOffersProvider =
     StreamProvider<List<DriverStandingRideOffer>>(
-  (ref) => ref
-      .watch(standingRideServiceProvider)
-      .watchAdminDriverStandingRideOffers(),
-);
+      (ref) => ref
+          .watch(standingRideServiceProvider)
+          .watchAdminDriverStandingRideOffers(),
+    );
 
 final pendingDriverStandingRideOffersProvider =
     StreamProvider<List<DriverStandingRideOffer>>(
-  (ref) => ref
-      .watch(standingRideServiceProvider)
-      .watchPendingDriverStandingRideOffers(),
-);
+      (ref) => ref
+          .watch(standingRideServiceProvider)
+          .watchPendingDriverStandingRideOffers(),
+    );
 
-final adminDashboardStatsProvider =
-    Provider<AsyncValue<AdminDashboardStats>>((ref) {
+final adminFixedRideSuggestionsProvider =
+    FutureProvider<List<FixedRideSuggestion>>(
+      (ref) =>
+          ref.watch(fixedRidePredictionServiceProvider).fetchAdminSuggestions(),
+    );
+
+final adminDashboardStatsProvider = Provider<AsyncValue<AdminDashboardStats>>((
+  ref,
+) {
   final rides = ref.watch(adminRideRequestsProvider);
   final pendingDrivers = ref.watch(pendingDriverApplicationsProvider);
-  final pendingStandingRideOffers =
-      ref.watch(pendingDriverStandingRideOffersProvider);
+  final pendingStandingRideOffers = ref.watch(
+    pendingDriverStandingRideOffersProvider,
+  );
 
   if (rides.hasError) {
     return AsyncValue.error(rides.error!, rides.stackTrace!);
@@ -146,22 +185,26 @@ final adminDashboardStatsProvider =
   );
 });
 
-final driverMatchesProvider =
-    StreamProvider.family<List<RideMatch>, String>((ref, driverId) {
+final driverMatchesProvider = StreamProvider.family<List<RideMatch>, String>((
+  ref,
+  driverId,
+) {
   return ref.watch(rideServiceProvider).watchMatchesForDriver(driverId);
 });
 
 final driverLocationForRideProvider =
     StreamProvider.family<DriverLocation?, String>((ref, rideRequestId) {
-  return ref
-      .watch(rideServiceProvider)
-      .watchDriverLocationForRide(rideRequestId);
-});
+      return ref
+          .watch(rideServiceProvider)
+          .watchDriverLocationForRide(rideRequestId);
+    });
 
 final feedbackForRideProvider =
     StreamProvider.family<List<RideFeedback>, String>((ref, rideRequestId) {
-  return ref.watch(feedbackServiceProvider).watchFeedbackForRide(rideRequestId);
-});
+      return ref
+          .watch(feedbackServiceProvider)
+          .watchFeedbackForRide(rideRequestId);
+    });
 
 final unresolvedIssuesProvider = StreamProvider<List<RideFeedback>>(
   (ref) => ref.watch(feedbackServiceProvider).watchUnresolvedIssues(),

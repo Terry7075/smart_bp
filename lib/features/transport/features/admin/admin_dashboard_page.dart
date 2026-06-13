@@ -92,6 +92,12 @@ class AdminDashboardPage extends ConsumerWidget {
                     ),
                     const SizedBox(height: 12),
                     FilledButton(
+                      onPressed: () =>
+                          context.push('/transport/admin/fixed-suggestions'),
+                      child: const Text('固定接送建議'),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton(
                       onPressed: () => context.push('/transport/admin/match'),
                       child: const Text('接送媒合'),
                     ),

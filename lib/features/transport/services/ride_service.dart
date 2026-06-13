@@ -13,7 +13,7 @@ class RideService {
 
   final SupabaseClient _client;
 
-  Future<void> createRideRequest({
+  Future<String> createRideRequest({
     required String pickupLocation,
     required String destination,
     required String? customDestination,
@@ -23,11 +23,13 @@ class RideService {
     required bool needReturn,
     required String? returnTime,
     required String note,
+    double? pickupLatitude,
+    double? pickupLongitude,
   }) async {
     final user = _client.auth.currentUser;
     if (user == null) throw StateError('User is not signed in.');
 
-    await _client.from('ride_requests').insert({
+    final payload = <String, dynamic>{
       'elder_id': user.id,
       'pickup_location': pickupLocation,
       'destination': destination,
@@ -38,7 +40,22 @@ class RideService {
       'need_return': needReturn,
       'return_time': returnTime,
       'note': note.trim().isEmpty ? null : note.trim(),
-    });
+      'status': RideStatus.pending.databaseValue,
+    };
+    if (pickupLatitude != null) {
+      payload['pickup_latitude'] = pickupLatitude;
+    }
+    if (pickupLongitude != null) {
+      payload['pickup_longitude'] = pickupLongitude;
+    }
+
+    final row = await _client
+        .from('ride_requests')
+        .insert(payload)
+        .select('id')
+        .single();
+
+    return row['id'] as String;
   }
 
   Stream<List<RideRequest>> watchMyRideRequests() {
@@ -53,7 +70,8 @@ class RideService {
         .map(
           (rows) => rows
               .map(
-                  (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)))
+                (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)),
+              )
               .toList(),
         );
   }
@@ -68,7 +86,8 @@ class RideService {
         .map(
           (rows) => rows
               .map(
-                  (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)))
+                (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)),
+              )
               .toList(),
         );
   }
@@ -86,8 +105,10 @@ class RideService {
   }
 
   Future<void> acceptRide(String rideRequestId) async {
-    await _client
-        .rpc('accept_ride', params: {'p_ride_request_id': rideRequestId});
+    await _client.rpc(
+      'accept_ride',
+      params: {'p_ride_request_id': rideRequestId},
+    );
   }
 
   Stream<List<RideRequest>> watchAdminRideRequests() {
@@ -99,7 +120,8 @@ class RideService {
         .map(
           (rows) => rows
               .map(
-                  (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)))
+                (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)),
+              )
               .toList(),
         );
   }
@@ -112,11 +134,14 @@ class RideService {
     required String driverId,
     required num distanceKm,
   }) async {
-    await _client.rpc('manual_match_ride', params: {
-      'p_ride_request_id': rideRequestId,
-      'p_driver_id': driverId,
-      'p_distance_km': distanceKm,
-    });
+    await _client.rpc(
+      'manual_match_ride',
+      params: {
+        'p_ride_request_id': rideRequestId,
+        'p_driver_id': driverId,
+        'p_distance_km': distanceKm,
+      },
+    );
   }
 
   Stream<List<RideMatch>> watchMatchesForDriver(String driverId) {
@@ -153,8 +178,11 @@ class RideService {
   }
 
   Future<Driver?> fetchDriverById(String driverId) async {
-    final row =
-        await _client.from('drivers').select().eq('id', driverId).maybeSingle();
+    final row = await _client
+        .from('drivers')
+        .select()
+        .eq('id', driverId)
+        .maybeSingle();
     if (row == null) return null;
     return Driver.fromJson(Map<String, dynamic>.from(row));
   }
@@ -175,17 +203,18 @@ class RideService {
   }) async {
     await _client
         .from('ride_matches')
-        .update({'status': status.databaseValue}).eq('id', matchId);
+        .update({'status': status.databaseValue})
+        .eq('id', matchId);
   }
 
   Future<void> cancelRideRequest({
     required String rideRequestId,
     String? reason,
   }) async {
-    await _client.rpc('cancel_ride_request', params: {
-      'p_ride_request_id': rideRequestId,
-      'p_reason': reason,
-    });
+    await _client.rpc(
+      'cancel_ride_request',
+      params: {'p_ride_request_id': rideRequestId, 'p_reason': reason},
+    );
   }
 
   Future<void> rescheduleRideRequest({
@@ -194,22 +223,28 @@ class RideService {
     required String rideTime,
     String? returnTime,
   }) async {
-    await _client.rpc('reschedule_ride_request', params: {
-      'p_ride_request_id': rideRequestId,
-      'p_ride_date': rideDate.toIso8601String().split('T').first,
-      'p_ride_time': rideTime,
-      'p_return_time': returnTime,
-    });
+    await _client.rpc(
+      'reschedule_ride_request',
+      params: {
+        'p_ride_request_id': rideRequestId,
+        'p_ride_date': rideDate.toIso8601String().split('T').first,
+        'p_ride_time': rideTime,
+        'p_return_time': returnTime,
+      },
+    );
   }
 
   Future<void> reassignRide({
     required String rideRequestId,
     required String newDriverId,
   }) async {
-    await _client.rpc('reassign_ride', params: {
-      'p_ride_request_id': rideRequestId,
-      'p_new_driver_id': newDriverId,
-    });
+    await _client.rpc(
+      'reassign_ride',
+      params: {
+        'p_ride_request_id': rideRequestId,
+        'p_new_driver_id': newDriverId,
+      },
+    );
   }
 
   Stream<DriverLocation?> watchDriverLocationForRide(String rideRequestId) {
@@ -217,9 +252,11 @@ class RideService {
         .from('driver_locations')
         .stream(primaryKey: ['id'])
         .eq('ride_request_id', rideRequestId)
-        .map((rows) => rows.isEmpty
-            ? null
-            : DriverLocation.fromJson(Map<String, dynamic>.from(rows.first)));
+        .map(
+          (rows) => rows.isEmpty
+              ? null
+              : DriverLocation.fromJson(Map<String, dynamic>.from(rows.first)),
+        );
   }
 
   Stream<List<RideRequest>> watchTodayRides() {
@@ -232,7 +269,8 @@ class RideService {
         .map(
           (rows) => rows
               .map(
-                  (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)))
+                (row) => RideRequest.fromJson(Map<String, dynamic>.from(row)),
+              )
               .toList(),
         );
   }
