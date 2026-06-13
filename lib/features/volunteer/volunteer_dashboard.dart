@@ -8,6 +8,7 @@ import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/health_monitoring/presentation/volunteer_monitoring_tab.dart';
 import 'package:smart_bp/features/medication/volunteer_drug_dictionary_add_page.dart';
+import 'package:smart_bp/features/shop/presentation/shop_orders_realtime_provider.dart';
 import 'package:smart_bp/features/volunteer/volunteer_content_manage.dart';
 import 'package:smart_bp/features/volunteer/volunteer_members_tab.dart';
 import 'package:smart_bp/features/volunteer/volunteer_batch_refill_provider.dart';
@@ -16,8 +17,9 @@ import 'package:smart_bp/features/volunteer/volunteer_shop_orders_page.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task.dart';
 import 'package:smart_bp/features/volunteer/volunteer_task_provider.dart';
 import 'package:smart_bp/features/volunteer/widgets/volunteer_hub_analytics_tab.dart';
+import 'package:smart_bp/features/shared/elder_phone_utils.dart';
+import 'package:smart_bp/features/volunteer/widgets/volunteer_shop_confirm_dialog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 const Color _kVolunteerBlue = Color(0xFF1565C0);
 const Color _kBackgroundCream = Color(0xFFFFF8E1);
@@ -31,26 +33,42 @@ const int _kPhotoSignedUrlSeconds = 60 * 60;
 /// 志工端主畫面分區。
 enum _VolunteerSection { health, shop, learning, activities }
 
-/// 志工任務儀表板（健康／商城／學習／活動）。
+/// 志工任務儀表板（健康／物資代購／學習／活動）。
 class VolunteerDashboard extends ConsumerStatefulWidget {
-  const VolunteerDashboard({super.key, this.initialTab = 0});
+  const VolunteerDashboard({
+    super.key,
+    this.initialHealthTab = 0,
+    this.initialShopTab = 0,
+    this.openShopSection = false,
+  });
 
-  /// 0=藥單 1=批次代領 2=監測 3=商城數據總覽(admin深連結) 4=會員管理
-  final int initialTab;
+  /// 健康分區子 Tab：0=藥單 1=批次代領 2=監測 3=藥典 4=會員管理
+  final int initialHealthTab;
+
+  /// 物資代購分區子 Tab：0=代購管理 1=數據總覽
+  final int initialShopTab;
+
+  /// 一進入就開啟「物資代購」分區（例如 `?tab=3` 導向數據總覽）
+  final bool openShopSection;
 
   @override
   ConsumerState<VolunteerDashboard> createState() => _VolunteerDashboardState();
 }
 
 class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard> {
-  /// initialTab == 3（admin 深連結／據點數據）→ 直接進「商城 · 數據總覽」。
-  late _VolunteerSection _section = widget.initialTab == 3
-      ? _VolunteerSection.shop
-      : _VolunteerSection.health;
+  late _VolunteerSection _section;
+
+  @override
+  void initState() {
+    super.initState();
+    _section = widget.openShopSection
+        ? _VolunteerSection.shop
+        : _VolunteerSection.health;
+  }
 
   String get _sectionTitle => switch (_section) {
         _VolunteerSection.health => '志工 · 健康',
-        _VolunteerSection.shop => '志工 · 商城',
+        _VolunteerSection.shop => '志工 · 柑仔店',
         _VolunteerSection.learning => '志工 · 學習',
         _VolunteerSection.activities => '志工 · 活動',
       };
@@ -85,6 +103,14 @@ class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard> {
                 tooltip: '重新整理',
                 icon: const Icon(Icons.refresh, size: 28),
                 onPressed: _refreshHealth,
+              ),
+            if (_section == _VolunteerSection.shop)
+              IconButton(
+                tooltip: '重新整理',
+                icon: const Icon(Icons.refresh, size: 28),
+                onPressed: () {
+                  ref.invalidate(shopVolunteerOrdersProvider);
+                },
               ),
             IconButton(
               tooltip: '交通管理',
@@ -125,11 +151,10 @@ class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard> {
       _VolunteerSection.health =>
         _VolunteerHealthSection(
           onRefreshAll: _refreshHealth,
-          initialTab: widget.initialTab,
+          initialTab: widget.initialHealthTab,
         ),
       _VolunteerSection.shop => _VolunteerShopSection(
-          initialView:
-              widget.initialTab == 3 ? _ShopView.analytics : _ShopView.orders,
+          initialTab: widget.initialShopTab,
         ),
       _VolunteerSection.learning =>
         const VolunteerContentManagePage(embedded: true),
@@ -138,7 +163,7 @@ class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard> {
   }
 }
 
-/// 上方四個分區按鈕：健康、商城、學習、活動。
+/// 上方四個分區按鈕：健康、物資代購、學習、活動。
 class _VolunteerSectionNav extends StatelessWidget {
   const _VolunteerSectionNav({
     required this.selected,
@@ -150,7 +175,7 @@ class _VolunteerSectionNav extends StatelessWidget {
 
   static const _items = <(_VolunteerSection, String, IconData)>[
     (_VolunteerSection.health, '健康', Icons.favorite),
-    (_VolunteerSection.shop, '商城', Icons.storefront),
+    (_VolunteerSection.shop, '柑仔店', Icons.storefront_outlined),
     (_VolunteerSection.learning, '學習', Icons.menu_book),
     (_VolunteerSection.activities, '活動', Icons.event),
   ];
@@ -217,6 +242,117 @@ class _SectionNavButton extends StatelessWidget {
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: selected ? Colors.white : _kVolunteerBlue,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 物資代購分區：代購管理、數據總覽。
+class _VolunteerShopSection extends StatefulWidget {
+  const _VolunteerShopSection({this.initialTab = 0});
+
+  final int initialTab;
+
+  @override
+  State<_VolunteerShopSection> createState() => _VolunteerShopSectionState();
+}
+
+class _VolunteerShopSectionState extends State<_VolunteerShopSection> {
+  late int _subTab;
+
+  @override
+  void initState() {
+    super.initState();
+    _subTab = widget.initialTab.clamp(0, 1);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: _ShopSubNavButton(
+                  label: '代購需求',
+                  icon: Icons.shopping_bag_outlined,
+                  selected: _subTab == 0,
+                  onTap: () => setState(() => _subTab = 0),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _ShopSubNavButton(
+                  label: '數據總覽',
+                  icon: Icons.bar_chart,
+                  selected: _subTab == 1,
+                  onTap: () => setState(() => _subTab = 1),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _subTab == 0
+              ? const VolunteerShopOrdersPage(embedded: true)
+              : VolunteerHubAnalyticsTab(
+                  onGoShoppingList: () => setState(() => _subTab = 0),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ShopSubNavButton extends StatelessWidget {
+  const _ShopSubNavButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? _kVolunteerBlue : Colors.grey.shade200,
+      borderRadius: BorderRadius.circular(28),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 22,
+                color: selected ? Colors.white : _kVolunteerBlue,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: selected ? Colors.white : _kVolunteerBlue,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -888,23 +1024,11 @@ class _TaskDetailSheetState extends ConsumerState<_TaskDetailSheet> {
   }
 
   Future<void> _callElder() async {
-    final phone = widget.task.elderPhone;
-    if (phone == null || phone.isEmpty) return;
-
-    final uri = Uri(scheme: 'tel', path: phone);
-    final ok = await launchUrl(uri);
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: const Color(0xFFBF360C),
-          content: Text(
-            '無法開啟撥號 App，請手動撥打 $phone',
-            style:
-                const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-        ),
-      );
-    }
+    await VolunteerShopConfirmDialog.launchTelForElder(
+      context,
+      elderUserId: widget.task.elderId,
+      fallbackPhone: widget.task.elderPhone,
+    );
   }
 
   @override
@@ -912,7 +1036,10 @@ class _TaskDetailSheetState extends ConsumerState<_TaskDetailSheet> {
     final task = widget.task;
     final me = Supabase.instance.client.auth.currentUser?.id;
     final isMine = me != null && task.isClaimedBy(me);
-    final hasPhone = (task.elderPhone ?? '').isNotEmpty;
+    final canCall = task.elderId.trim().isNotEmpty;
+    final displayPhone = ElderPhoneUtils.formatForDisplay(task.elderPhone) ??
+        task.elderPhone;
+    final hasDisplayPhone = (displayPhone ?? '').isNotEmpty;
 
     return DraggableScrollableSheet(
       expand: false,
@@ -956,7 +1083,7 @@ class _TaskDetailSheetState extends ConsumerState<_TaskDetailSheet> {
               _DetailRow(
                 icon: Icons.phone,
                 label: '聯絡電話',
-                value: hasPhone ? task.elderPhone! : '（沒有提供）',
+                value: hasDisplayPhone ? displayPhone! : '（沒有提供，仍可嘗試撥號）',
               ),
               if (task.hospitalName != null) ...[
                 const SizedBox(height: 12),
@@ -1012,9 +1139,9 @@ class _TaskDetailSheetState extends ConsumerState<_TaskDetailSheet> {
                 ),
               if (isMine && task.status == VolunteerTaskStatus.inProgress) ...[
                 _PrimaryButton(
-                  label: hasPhone ? '📞 撥打電話給長輩' : '📞 沒有電話可撥打',
+                  label: canCall ? '📞 撥打電話給長輩' : '📞 無法撥號',
                   color: _kVolunteerBlue,
-                  onPressed: _isWorking || !hasPhone ? null : _callElder,
+                  onPressed: _isWorking || !canCall ? null : _callElder,
                 ),
                 const SizedBox(height: 12),
                 _PrimaryButton(

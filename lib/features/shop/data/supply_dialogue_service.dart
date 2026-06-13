@@ -51,22 +51,70 @@ class SupplyDialogueService {
 
     switch (pending.step) {
       case SupplyDialogueStep.awaitBrand:
-        final option = ElderSupplyTemplates.findOption(cat, userText);
-        if (option == null) {
+        final brandOpt = ElderSupplyTemplates.findBrandOption(cat, userText);
+        if (brandOpt == null) {
           return (
             next: pending,
             reply: _brandAskReply(cat, pending),
             snapshot: null,
           );
         }
-        if (option.isOther) {
+        if (brandOpt.isOther) {
           return (
             next: pending.copyWith(
               step: SupplyDialogueStep.awaitOtherNote,
-              selectedOptionId: option.id,
+              selectedOptionId: brandOpt.id,
             ),
             reply: AssistantReply(
-              text: '好的，請告訴我您想要哪一款${cat.label}（或說「都可以」）。',
+              text: '請說出想要的品牌名稱。',
+              actions: const [],
+            ),
+            snapshot: null,
+          );
+        }
+        return (
+          next: pending.copyWith(
+            step: SupplyDialogueStep.awaitCapacity,
+            selectedBrand: brandOpt.brand,
+          ),
+          reply: _capacityAskReply(cat, pending, brandOpt.brand),
+          snapshot: null,
+        );
+      case SupplyDialogueStep.awaitCapacity:
+        final brand = pending.selectedBrand;
+        if (brand == null || brand.isEmpty) {
+          return (next: null, reply: null, snapshot: null);
+        }
+        final capOpt = ElderSupplyTemplates.findCapacityOption(cat, brand, userText);
+        if (capOpt == null) {
+          return (
+            next: pending,
+            reply: _capacityAskReply(cat, pending, brand),
+            snapshot: null,
+          );
+        }
+        if (capOpt.isCustomCapacity) {
+          final t = userText.trim();
+          if (!RegExp(r'^\d+$').hasMatch(t) && t.isNotEmpty) {
+            final snap = ElderSupplyTemplates.buildSnapshot(
+              category: cat,
+              option: capOpt,
+              quantity: pending.quantity,
+              unitLabel: pending.unitLabel,
+              specOverride: t,
+            );
+            return (
+              next: null,
+              reply: _addedReply(cat, snap),
+              snapshot: snap,
+            );
+          }
+          return (
+            next: pending.copyWith(step: SupplyDialogueStep.awaitCustomCapacity),
+            reply: AssistantReply(
+              text: brand == ElderSupplyTemplates.unspecifiedBrandLabel
+                  ? '請說出想要的容量，品牌由志工代選。'
+                  : '請說出想要的容量。',
               actions: const [],
             ),
             snapshot: null,
@@ -74,44 +122,126 @@ class SupplyDialogueService {
         }
         final snap = ElderSupplyTemplates.buildSnapshot(
           category: cat,
-          option: option,
+          option: capOpt,
           quantity: pending.quantity,
           unitLabel: pending.unitLabel,
         );
-        final brandLine = option.isUnspecified
-            ? '${cat.label}（志工代選品牌）'
-            : '${snap.brand} · ${snap.productName}';
         return (
           next: null,
-          reply: AssistantReply(
-            text: '已加入採買清單：$brandLine × ${snap.quantity}${snap.unitLabel ?? ""}。\n'
-                '確認無誤後，請按下方「送出給志工」。',
-            actions: const [],
-          ),
+          reply: _addedReply(cat, snap),
+          snapshot: snap,
+        );
+      case SupplyDialogueStep.awaitCustomCapacity:
+        final brand = pending.selectedBrand;
+        if (brand == null || brand.isEmpty) {
+          return (next: null, reply: null, snapshot: null);
+        }
+        final spec = userText.trim();
+        if (spec.isEmpty) {
+          return (
+            next: pending,
+            reply: AssistantReply(
+              text: '請再說一次容量。',
+              actions: const [],
+            ),
+            snapshot: null,
+          );
+        }
+        final snap = ElderSupplyTemplates.buildSnapshot(
+          category: cat,
+          option: ElderSupplyTemplates.customCapacityPicker(cat, brand),
+          quantity: pending.quantity,
+          unitLabel: pending.unitLabel,
+          specOverride: spec,
+        );
+        return (
+          next: null,
+          reply: _addedReply(cat, snap),
           snapshot: snap,
         );
       case SupplyDialogueStep.awaitOtherNote:
-        final option = cat.options.firstWhere((o) => o.isOther);
-        final note = userText.trim().isEmpty ? pending.rawUtterance : userText.trim();
-        final snap = ElderSupplyTemplates.buildSnapshot(
-          category: cat,
-          option: option,
-          quantity: pending.quantity,
-          unitLabel: pending.unitLabel,
-          referenceNote: note ?? cat.label,
-        );
+        final note = userText.trim();
+        if (note.isEmpty) {
+          return (
+            next: pending,
+            reply: const AssistantReply(
+              text: '請說出想要的品牌名稱。',
+              actions: [],
+            ),
+            snapshot: null,
+          );
+        }
         return (
-          next: null,
-          reply: AssistantReply(
-            text: '已記下：${cat.label}（其他）× ${snap.quantity}，備註：${snap.referenceNote}。\n'
-                '確認無誤後，請按下方「送出給志工」。',
-            actions: const [],
+          next: pending.copyWith(
+            step: SupplyDialogueStep.awaitCapacity,
+            selectedBrand: note,
           ),
-          snapshot: snap,
+          reply: _capacityAskReply(
+            cat,
+            pending.copyWith(selectedBrand: note),
+            note,
+          ),
+          snapshot: null,
         );
       case SupplyDialogueStep.awaitQty:
         return (next: null, reply: null, snapshot: null);
     }
+  }
+
+  AssistantReply _addedReply(SupplyCategory cat, SupplyLineSnapshot snap) {
+    final brandLine = snap.brand == ElderSupplyTemplates.unspecifiedBrandLabel
+        ? '${cat.label}（${ElderSupplyTemplates.volunteerPickBrandDisplayLabel}）${snap.spec ?? ""}'
+        : '${ElderSupplyTemplates.displayBrandLabel(snap.brand)} · ${snap.productName} ${snap.spec ?? ""}';
+    return AssistantReply(
+      text: '已加入採買清單：$brandLine × ${snap.quantity}${snap.unitLabel ?? ""}。',
+      actions: const [],
+    );
+  }
+
+  AssistantReply _capacityAskReply(
+    SupplyCategory cat,
+    PendingSupplyDialogue pending,
+    String brand,
+  ) {
+    final qty = pending.quantity;
+    final unit = pending.unitLabel ?? cat.defaultUnitLabel;
+    final choices = ElderSupplyTemplates.capacityChoicesForBrand(cat, brand);
+    final actions = <AssistantNavAction>[];
+    final brandChoices = <AssistantBrandChoice>[];
+    for (var i = 0; i < choices.length; i++) {
+      final o = choices[i];
+      final idx = i + 1;
+      final label = o.isCustomCapacity ? '自己填容量' : o.spec;
+      brandChoices.add(
+        AssistantBrandChoice(
+          index: idx,
+          optionId: o.id,
+          label: label,
+          priceHint: o.isCustomCapacity
+              ? '自行輸入'
+              : o.refPrice != null
+                  ? '約 ${o.refPrice!.toInt()} 元'
+                  : '請志工現場確認',
+          fallbackEmoji: ElderSupplyTemplates.emojiForCategoryKey(cat.key),
+          sendMessageOnTap: '$idx',
+        ),
+      );
+      actions.add(
+        AssistantNavAction(
+          label: '$idx. $label',
+          sendMessageOnTap: '$idx',
+        ),
+      );
+    }
+    final brandHint = brand == ElderSupplyTemplates.unspecifiedBrandLabel
+        ? '（${ElderSupplyTemplates.volunteerPickBrandDisplayLabel}）'
+        : '（${ElderSupplyTemplates.displayBrandLabel(brand)}）';
+    return AssistantReply(
+      text: '您要${cat.label} $qty $unit $brandHint。\n請問要哪個容量？',
+      actions: actions,
+      brandChoices: brandChoices,
+      categoryImageUrl: pending.categoryImageUrl ?? cat.categoryImageUrl,
+    );
   }
 
   AssistantReply brandAskReplyFor(PendingSupplyDialogue pending) {
@@ -127,7 +257,7 @@ class SupplyDialogueService {
     final unit = pending.unitLabel ?? cat.defaultUnitLabel;
     final ranked = _recommendation.recommendLocal(categoryKey: cat.key, limit: 5);
     final rankIds = ranked.map((r) => r.templateOptionId ?? r.brandId).toSet();
-    final sortedOptions = [...cat.options]
+    final sortedOptions = ElderSupplyTemplates.distinctBrands(cat)
       ..sort((a, b) {
         int tier(SupplyBrandOption o) {
           if (o.isOther) return 2;
@@ -154,30 +284,27 @@ class SupplyDialogueService {
     for (var i = 0; i < sortedOptions.length; i++) {
       final o = sortedOptions[i];
       final idx = i + 1;
-      final price = o.refPrice != null ? '約\${o.refPrice!.toInt()}元' : null;
       choices.add(
         AssistantBrandChoice(
           index: idx,
           optionId: o.id,
-          label: o.brand,
-          subtitle: o.spec,
-          priceHint: price,
-          imageUrl: o.imageUrl,
+          label: ElderSupplyTemplates.displayBrandLabel(o.brand),
+          subtitle: o.isUnspecified
+              ? '由志工依現場狀況代選'
+              : (o.isOther ? '請填寫指定品牌' : null),
+          fallbackEmoji: ElderSupplyTemplates.emojiForCategoryKey(cat.key),
           sendMessageOnTap: '$idx',
         ),
       );
       actions.add(
         AssistantNavAction(
-          label: '$idx. ${o.brand}',
+          label: '$idx. ${ElderSupplyTemplates.displayBrandLabel(o.brand)}',
           sendMessageOnTap: '$idx',
         ),
       );
     }
-    final hint = ranked.isNotEmpty
-        ? '\n（依社區常買與參考價推薦：${ranked.take(3).map((r) => r.brandName).join('、')}）'
-        : '';
     return AssistantReply(
-      text: '您要${cat.label} $qty $unit。\n請問要哪一款？點選下方或說 1、2、3。$hint',
+      text: '您要${cat.label} $qty $unit。\n請問要哪一款？',
       actions: actions,
       brandChoices: choices,
       categoryImageUrl: pending.categoryImageUrl ?? cat.categoryImageUrl,

@@ -38,7 +38,7 @@ function buildFcmDataPayload(
   };
   if (body.payload) {
     for (const [k, v] of Object.entries(body.payload)) {
-      if (v != null && k !== "family_route") data[k] = String(v);
+      if (v != null) data[k] = String(v);
     }
   }
   return data;
@@ -226,7 +226,6 @@ Deno.serve(async (req) => {
     user_id?: string;
     user_ids?: string[];
     elder_user_id?: string;
-    notify_family?: boolean;
     target_role?: string;
     event_type?: string;
     title?: string;
@@ -248,11 +247,6 @@ Deno.serve(async (req) => {
     typeof body.payload?.route === "string"
       ? body.payload.route
       : "/volunteer/shop-orders";
-  const familyRoute =
-    typeof body.payload?.family_route === "string"
-      ? body.payload.family_route
-      : "/family/home";
-
   let totalTokens = 0;
   let anySuccess = false;
   const fcmStatuses: number[] = [];
@@ -276,17 +270,6 @@ Deno.serve(async (req) => {
 
   if (body.elder_user_id) {
     await dispatch([body.elder_user_id], defaultRoute);
-    if (body.notify_family !== false) {
-      const { data: links } = await admin
-        .from("family_elder_links")
-        .select("family_user_id")
-        .eq("elder_user_id", body.elder_user_id)
-        .eq("status", "active");
-      const familyIds = (links ?? []).map((r: { family_user_id: string }) =>
-        r.family_user_id
-      );
-      await dispatch(familyIds, familyRoute);
-    }
   } else if (body.user_ids && body.user_ids.length > 0) {
     await dispatch(body.user_ids, defaultRoute);
   } else if (body.user_id) {

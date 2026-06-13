@@ -21,12 +21,11 @@ class Profile {
   /// 「志工」角色字串（資料庫端值）。
   static const String kRoleVolunteer = 'volunteer';
 
-  static const String kRoleFamily = 'family';
-
   static const String kRoleAdmin = 'admin';
 
   /// 「司機」角色字串（社區交通模組）。
   static const String kRoleDriver = 'driver';
+
 
   final String id;
   final String name;
@@ -45,13 +44,13 @@ class Profile {
     return name.substring(0, 1);
   }
 
-  /// 是否為志工身分（給 Router / 首頁分流用）。
-  bool get isVolunteer => role == kRoleVolunteer;
+  /// 是否為志工身分（給 Router / 志工端分流用）。
+  /// 資料庫若殘留 `admin` 字串，一律視同志工。
+  bool get isVolunteer =>
+      role == kRoleVolunteer || role == 'admin';
 
   /// 是否為長輩身分（預設角色）。
   bool get isElder => role == kRoleElder;
-
-  bool get isFamily => role == kRoleFamily;
 
   bool get isAdmin => role == kRoleAdmin;
 

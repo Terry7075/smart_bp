@@ -16,6 +16,7 @@ import 'package:smart_bp/features/shop/data/supply_dialogue_service.dart';
 import 'package:smart_bp/features/shop/domain/pending_supply_dialogue.dart';
 import 'package:smart_bp/features/shop/domain/shop_nlu_result.dart';
 import 'package:smart_bp/features/shop/presentation/shop_collaboration_providers.dart';
+import 'package:smart_bp/features/shop/presentation/shop_draft_providers.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/recommendation_cards_widget.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_brand_choice.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_history_provider.dart';
@@ -298,10 +299,11 @@ class AssistantChat extends Notifier<AssistantChatState> {
           userText: resolved,
         );
         if (handled.snapshot != null && userId != null) {
-          await ref.read(demandRecordsRepositoryProvider).addSnapshotLines(
+          await ref.read(demandRecordsRepositoryProvider).addSnapshotLinesResilient(
                 userId: userId,
                 lines: [handled.snapshot!],
               );
+          ref.invalidate(elderDemandDraftProvider);
         }
         final reply = handled.reply;
         if (reply != null) {
@@ -349,6 +351,7 @@ class AssistantChat extends Notifier<AssistantChatState> {
                 userId: userId,
                 lines: [turn.snapshot!],
               );
+          ref.invalidate(elderDemandDraftProvider);
           final assistantMsg = AssistantMessage(
             role: AssistantMessageRole.assistant,
             text: '${turn.reply?.text ?? '已記下「${turn.snapshot!.productName}」。'}\n'
@@ -429,8 +432,7 @@ class AssistantChat extends Notifier<AssistantChatState> {
           );
       final reply = meta.reply;
       final brandFollowUp = reply.brandChoices.isNotEmpty;
-      final draftSaved = reply.text.contains('已加入採買清單') ||
-          reply.text.contains('需求草稿');
+      final draftSaved = reply.text.contains('採買清單');
       PendingSupplyDialogue? newPending;
       if (brandFollowUp) {
         newPending = supplyDialogue.tryStartFromUtterance(resolved);
@@ -467,6 +469,9 @@ class AssistantChat extends Notifier<AssistantChatState> {
         pendingSupply: newPending ?? state.pendingSupply,
         clearPendingSupply: draftSaved && !brandFollowUp,
       );
+      if (draftSaved) {
+        ref.invalidate(elderDemandDraftProvider);
+      }
       await _persistActiveSession();
     } catch (e) {
       state = state.copyWith(loading: false);

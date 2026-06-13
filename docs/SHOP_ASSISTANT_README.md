@@ -12,9 +12,7 @@
 | **長輩** | `elder` | 記需求、語音、柑仔店下單、Hybrid NLU 小幫手、三卡推薦 |
 | **志工** | `volunteer` | **代購執行**（看單、今日採買清單、履行狀態）＋ **據點數據總覽**（主控台 Tab 4） |
 
-**口試敘事**：物資子系統僅 **長輩 + 志工** 兩種登入；據點統計、滯留單、熱門品項、據點資產檢視已併入志工 `/volunteer-dashboard?tab=3`，**不另開據點管理者 App**。
-
-**程式相容**：`profiles.role` 仍可有 `admin`（RLS／測試帳號）；登入 `admin` 會導向志工主控台數據 Tab。`family` 為延伸模組，第五章主敘事可不提。
+**口試敘事**：物資子系統僅 **長輩 + 志工** 兩種登入；據點統計、滯留單、熱門品項、據點資產檢視已併入志工主控台「數據總覽」分頁。
 
 ---
 
@@ -34,10 +32,8 @@
 | 對話歷史 | `/assistant/history` | `assistant_chat_history_page.dart` |
 | 志工物資／今日採買 | `/volunteer/shop-orders` | `volunteer_shop_orders_page.dart`、`volunteer_daily_shopping_list_panel.dart` |
 | 志工數據總覽 | `/volunteer-dashboard?tab=3` | `volunteer_hub_analytics_tab.dart` |
-| 舊管理路由（跳轉） | `/admin/dashboard` | → `volunteer-dashboard?tab=3` |
-| 家屬關懷（延伸） | `/family/home` | `family_home_page.dart` |
 
-角色分流：`lib/core/router.dart`、`lib/features/auth/role_guard.dart`（志工 Hub 含 `volunteer` 與 `admin`）
+角色分流：`lib/core/router.dart`、`lib/features/auth/role_guard.dart`（僅 `elder` / `volunteer`）
 
 ---
 
@@ -87,7 +83,7 @@
 
 | 項目 | 狀態 | 說明 |
 |------|------|------|
-| Supabase Auth + RLS | ✅ | 志工/admin 統一訂單與資產政策（`20260603`） |
+| Supabase Auth + RLS | ✅ | 長輩／志工訂單與資產政策（`20260603`） |
 | 商品語意庫 | ✅ | `product_items`、`product_aliases` |
 | Realtime（orders、demand） | ✅ | migration `20260607` 冪等加入；未跑則 Dashboard 手動開 |
 | 離線佇列 | ✅ | `flush` 僅同步草稿；送出須柑仔店按鈕 |
@@ -109,7 +105,7 @@
 
 見 **`supabase/DEPLOY.md`**（階段 A 基礎 schema → B1～B8 migrations → C1 查價種子）。新電腦請先讀 **[TEAM_SETUP.md](TEAM_SETUP.md)**。
 
-測試帳號 `profiles.role`：`elder` / `volunteer`（主敘事）；`admin` 導向志工 Hub；`family` 延伸。
+測試帳號 `profiles.role`：`elder` / `volunteer`。
 
 ---
 
@@ -127,7 +123,7 @@ flutter test test/shop_manual_voice_parser_test.dart
 
 ## 7. 口試 Demo 建議路徑（約 5 分鐘）
 
-見 **[DEMO_SCRIPT.md](DEMO_SCRIPT.md)**：柑仔店語音 → 品牌確認 → 送出志工 → 志工接單 →（可選）家屬／我的需求單 → 數據總覽 Tab。
+見 **[DEMO_SCRIPT.md](DEMO_SCRIPT.md)**：柑仔店語音 → 品牌確認 → 送出志工 → 志工接單 → 我的需求單 → 數據總覽 Tab。
 
 ---
 

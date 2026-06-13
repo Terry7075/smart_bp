@@ -27,7 +27,18 @@ final class ShopSupplyDialogueState {
   final String? lastMessage;
   final bool busy;
 
-  bool get awaitingBrand => pending != null && brandChoices.isNotEmpty;
+  bool get awaitingBrand =>
+      pending?.step == SupplyDialogueStep.awaitBrand && brandChoices.isNotEmpty;
+
+  bool get awaitingCapacity =>
+      (pending?.step == SupplyDialogueStep.awaitCapacity ||
+          pending?.step == SupplyDialogueStep.awaitCustomCapacity) &&
+      brandChoices.isNotEmpty;
+
+  bool get awaitingOtherNote =>
+      pending?.step == SupplyDialogueStep.awaitOtherNote;
+
+  bool get hasPendingDialogue => pending != null;
 
   ShopSupplyDialogueState copyWith({
     PendingSupplyDialogue? pending,

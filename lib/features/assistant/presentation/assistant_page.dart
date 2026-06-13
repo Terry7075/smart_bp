@@ -5,6 +5,7 @@ import 'package:smart_bp/features/assistant/data/assistant_hints.dart';
 import 'package:smart_bp/features/assistant/data/assistant_navigation.dart';
 import 'package:smart_bp/features/assistant/data/assistant_shop_navigation.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_message.dart';
+import 'package:smart_bp/features/assistant/presentation/assistant_chat_mode_provider.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_history_sidebar.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_history_provider.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_provider.dart';
@@ -177,16 +178,9 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
             icon: const Icon(Icons.arrow_back, size: 30),
             onPressed: () => context.pop(),
           ),
-          title: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.smart_toy, size: 30),
-              SizedBox(width: 10),
-              Text(
-                '小幫手',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-            ],
+          title: const Text(
+            '智慧小幫手',
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
           ),
           centerTitle: true,
           toolbarHeight: 64,
@@ -231,6 +225,8 @@ class _AssistantPageState extends ConsumerState<AssistantPage> {
             Expanded(
               child: Column(
                 children: [
+                  if (!chat.viewingHistory)
+                    const _AssistantSmartBanner(),
                   if (chat.viewingHistory)
                     Material(
                       color: const Color(0xFFFFF3E0),
@@ -484,6 +480,10 @@ class _AssistantHelpPanel extends StatelessWidget {
     required this.onAsk,
   });
 
+  static const _green = Color(0xFF2E7D32);
+  static const _greenDark = Color(0xFF1B5E20);
+  static const _greenPale = Color(0xFFE8F5E9);
+
   final bool loading;
   final void Function(String question) onAsk;
 
@@ -491,122 +491,339 @@ class _AssistantHelpPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
-      child: Card(
-        elevation: 2,
-        color: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: Color(0xFF2E7D32), width: 1.5),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: _green.withValues(alpha: 0.14),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                '我能幫您什麼？',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1B5E20),
-                ),
-              ),
-              const SizedBox(height: 12),
-              ...AssistantHints.capabilities.map((c) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(c.icon, style: const TextStyle(fontSize: 28)),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              c.title,
-                              style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              c.subtitle,
-                              style: TextStyle(
-                                fontSize: 17,
-                                height: 1.35,
-                                color: Colors.grey.shade800,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+              Container(
+                padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF388E3C), _greenDark],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                );
-              }),
-              const Divider(height: 24),
-              const Text(
-                AssistantHints.helpPanelTitle,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF5D4037),
                 ),
-              ),
-              const SizedBox(height: 10),
-              ...AssistantHints.sampleQuestions.map((q) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Material(
-                    color: const Color(0xFFFFF3E0),
-                    borderRadius: BorderRadius.circular(12),
-                    child: InkWell(
-                      onTap: loading ? null : () => onAsk(q),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.chat_bubble_outline,
-                              color: Color(0xFFE65100),
-                              size: 26,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                q,
-                                style: const TextStyle(
-                                  fontSize: 19,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            const Icon(
-                              Icons.touch_app,
-                              color: Color(0xFF5D4037),
-                              size: 24,
-                            ),
-                          ],
-                        ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.smart_toy_rounded,
+                        color: Colors.white,
+                        size: 30,
                       ),
                     ),
-                  ),
-                );
-              }),
-              const SizedBox(height: 8),
-              Text(
-                AssistantHints.helpPanelFootnote,
-                style: TextStyle(
-                  fontSize: 16,
-                  height: 1.4,
-                  color: Colors.grey.shade700,
+                    const SizedBox(width: 14),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '我能幫您什麼？',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            '點選下方問題，或直接打字、語音問我',
+                            style: TextStyle(
+                              fontSize: 15,
+                              height: 1.35,
+                              color: Color(0xFFE8F5E9),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+              Container(
+                color: Colors.white,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final twoCol = constraints.maxWidth >= 340;
+                        return Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            for (final c in AssistantHints.capabilities)
+                              SizedBox(
+                                width: twoCol
+                                    ? (constraints.maxWidth - 10) / 2
+                                    : constraints.maxWidth,
+                                child: _CapabilityTile(capability: c),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 18),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                      decoration: BoxDecoration(
+                        color: _greenPale,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: _green.withValues(alpha: 0.18),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(
+                                  Icons.help_outline_rounded,
+                                  color: _green,
+                                  size: 22,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      AssistantHints.helpPanelTitle,
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: _greenDark,
+                                      ),
+                                    ),
+                                    Text(
+                                      AssistantHints.helpPanelSubtitle,
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        color: Color(0xFF558B2F),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          for (var gi = 0;
+                              gi < AssistantHints.faqGroups.length;
+                              gi++) ...[
+                            if (gi > 0) const SizedBox(height: 12),
+                            _FaqGroupSection(
+                              group: AssistantHints.faqGroups[gi],
+                              loading: loading,
+                              onAsk: onAsk,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      AssistantHints.helpPanelFootnote,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 15,
+                        height: 1.4,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CapabilityTile extends StatelessWidget {
+  const _CapabilityTile({required this.capability});
+
+  final AssistantCapability capability;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: capability.accent.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: capability.accent.withValues(alpha: 0.22),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: capability.accent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(capability.icon, color: capability.accent, size: 22),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  capability.title,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: capability.accent,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  capability.subtitle,
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.35,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FaqGroupSection extends StatelessWidget {
+  const _FaqGroupSection({
+    required this.group,
+    required this.loading,
+    required this.onAsk,
+  });
+
+  final AssistantFaqGroup group;
+  final bool loading;
+  final void Function(String question) onAsk;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(group.icon, size: 18, color: group.accent),
+            const SizedBox(width: 6),
+            Text(
+              group.label,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: group.accent,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final q in group.questions)
+              _FaqChip(
+                question: q,
+                accent: group.accent,
+                loading: loading,
+                onTap: () => onAsk(q),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _FaqChip extends StatelessWidget {
+  const _FaqChip({
+    required this.question,
+    required this.accent,
+    required this.loading,
+    required this.onTap,
+  });
+
+  final String question;
+  final Color accent;
+  final bool loading;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: accent.withValues(alpha: 0.35)),
+      ),
+      child: InkWell(
+        onTap: loading ? null : onTap,
+        borderRadius: BorderRadius.circular(24),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.chat_bubble_outline, size: 18, color: accent),
+              const SizedBox(width: 8),
+              Text(
+                question,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF3E2723),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 14,
+                color: accent.withValues(alpha: 0.7),
               ),
             ],
           ),
@@ -845,8 +1062,68 @@ class _TypingBubble extends StatelessWidget {
           ),
           SizedBox(width: 12),
           Text(
-            '正在查詢您的資料…',
+            '小幫手正在回覆…',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AssistantSmartBanner extends StatelessWidget {
+  const _AssistantSmartBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF2E7D32).withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.auto_awesome,
+              color: Color(0xFF2E7D32),
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  AssistantChatMode.smart.title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1B5E20),
+                  ),
+                ),
+                Text(
+                  AssistantChatMode.smart.subtitle,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF558B2F),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),

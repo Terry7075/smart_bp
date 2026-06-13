@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_brand_choice.dart';
 import 'package:smart_bp/features/shop/domain/recommendation_card.dart';
+import 'package:smart_bp/features/shop/data/elder_supply_templates.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/brand_choice_list.dart';
 
 /// 三卡推薦（常買 / 便宜 / 志工）— 複用 [BrandChoiceList]。
@@ -27,6 +28,10 @@ class RecommendationCardsWidget extends StatelessWidget {
             label: _kindLabel(c.kind),
             subtitle: c.displayName,
             priceHint: c.refPrice != null ? '約 \$${c.refPrice!.toStringAsFixed(0)}' : null,
+            imageUrl: c.imageUrl,
+            fallbackEmoji: c.templateOptionId != null
+                ? ElderSupplyTemplates.emojiForTemplateOption(c.templateOptionId)
+                : ElderSupplyTemplates.emojiForDisplayName(c.displayName),
             sendMessageOnTap: c.displayName,
           ),
     ];

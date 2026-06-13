@@ -11,6 +11,20 @@
 class ShopCategoryImages {
   ShopCategoryImages._();
 
+  /// 常用物資品類 key → 離線 emoji（Demo 必備，不依賴網路）。
+  static const Map<String, String> supplyEmojiByKey = {
+    'tissue': '🧻',
+    'egg': '🥚',
+    'milk': '🥛',
+    'rice': '🍚',
+    'detergent': '🧴',
+    'diaper': '🩹',
+    'instant_noodle': '🍜',
+  };
+
+  static String emojiForSupplyKey(String? key) =>
+      supplyEmojiByKey[key] ?? '🛒';
+
   static const Map<String, String> _urls = {
     '衛生紙':
         'https://cdn-icons-png.flaticon.com/128/2910/2910913.png',

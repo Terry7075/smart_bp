@@ -23,6 +23,16 @@ final class PriceReference {
 
   /// 例如「柑仔店目錄」「常見參考」。
   final String? sourceNote;
+
+  /// 畫面顯示用：過濾舊種子殘留的 Demo 字樣。
+  String? get displaySourceNote {
+    final raw = sourceNote?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    return raw
+        .replaceAll(RegExp(r'[（(]\s*[Dd]emo\s*[）)]'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
 }
 
 final class PriceReferencesRepository {

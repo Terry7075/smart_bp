@@ -20,50 +20,58 @@ class AssistantReplyService {
   static const _navEvents = AssistantNavAction(label: '前往活動', route: '/home', homeTab: 5);
   static const _navProfile = AssistantNavAction(label: '前往個人資料', route: '/profile');
 
-  AssistantReply reply(String question, AssistantSnapshot snapshot) {
+  /// 回覆並標記是否命中明確規則（未命中時應走 Gemini 兜底）。
+  ({AssistantReply reply, bool ruleMatched}) replyWithMatch(
+    String question,
+    AssistantSnapshot snapshot,
+  ) {
     final normalized = question.trim().toLowerCase().replaceAll(' ', '');
 
     if (_matchAny(normalized, ['你好', '嗨', '哈囉', '早安', '午安', '晚安'])) {
-      return _greeting(snapshot);
+      return (reply: _greeting(snapshot), ruleMatched: true);
     }
     if (_matchAny(normalized, ['全部', '所有', '功能', '導覽', '教學', '地圖'])) {
-      return _fullGuide(snapshot);
+      return (reply: _fullGuide(snapshot), ruleMatched: true);
     }
     if (_matchAny(normalized, ['個人', '資料', '帳號', '登出', '頭像'])) {
-      return _profileGuide();
+      return (reply: _profileGuide(), ruleMatched: true);
     }
     if (_matchAny(normalized, ['首頁', '主畫面', '主頁'])) {
-      return _homeGuide(snapshot);
+      return (reply: _homeGuide(snapshot), ruleMatched: true);
     }
     if (_matchAny(normalized, ['交通', '公車', '接駁', '巴士'])) {
-      return _transportGuide();
+      return (reply: _transportGuide(), ruleMatched: true);
     }
     if (_matchAny(normalized, ['學習', '課程', '講座', '報名'])) {
-      return _learningGuide();
+      return (reply: _learningGuide(), ruleMatched: true);
     }
     if (_matchAny(normalized, ['活動', '共餐', '聚會'])) {
-      return _eventsGuide();
+      return (reply: _eventsGuide(), ruleMatched: true);
     }
     if (_matchAny(normalized, ['藥單', '處方', '志工', '掃描', 'ocr', '健康', '藥'])) {
       if (_matchAny(normalized, ['怎麼', '如何', '哪裡', '哪', '在哪'])) {
-        return _howHealthScan();
+        return (reply: _howHealthScan(), ruleMatched: true);
       }
-      return _prescriptionReply(snapshot);
+      return (reply: _prescriptionReply(snapshot), ruleMatched: true);
     }
     if (_matchAny(normalized, ['代購', '柑仔店', '訂單', '需求單', '商店', '買'])) {
       if (_matchAny(normalized, ['怎麼', '如何', '哪裡', '哪', '在哪'])) {
-        return _howShop();
+        return (reply: _howShop(), ruleMatched: true);
       }
-      return _shopOrdersReply(snapshot);
+      return (reply: _shopOrdersReply(snapshot), ruleMatched: true);
     }
     if (_matchAny(normalized, ['吃藥', '提醒', '打卡', '鬧鐘'])) {
-      return _medicationReply(snapshot);
+      return (reply: _medicationReply(snapshot), ruleMatched: true);
     }
     if (_matchAny(normalized, ['可以做', '能做', '幫我', '幫忙'])) {
-      return _appOverview(snapshot);
+      return (reply: _appOverview(snapshot), ruleMatched: true);
     }
 
-    return _fallback(snapshot);
+    return (reply: _fallback(snapshot), ruleMatched: false);
+  }
+
+  AssistantReply reply(String question, AssistantSnapshot snapshot) {
+    return replyWithMatch(question, snapshot).reply;
   }
 
   bool _matchAny(String text, List<String> keys) {
@@ -306,7 +314,7 @@ class AssistantReplyService {
     return switch (status) {
       'pending' => '已送出（待處理）',
       'processing' => '志工處理中',
-      'completed' => '已完成',
+      'completed' => '已送達活動中心',
       'cancelled' => '已取消',
       _ => status,
     };
@@ -320,6 +328,12 @@ class AssistantReplyService {
     });
     final tail = order.items.length > 3 ? ' 等' : '';
     return '${parts.join('、')}$tail';
+  }
+
+  /// 傳給 Gemini 的 App 即時摘要（不可捏造，僅供參考）。
+  String buildAiContextSummary(AssistantSnapshot snapshot) {
+    return '${_prescriptionText(snapshot, brief: true)}\n'
+        '${_shopOrdersText(snapshot, brief: true)}';
   }
 
   static String _formatTime(DateTime t) {

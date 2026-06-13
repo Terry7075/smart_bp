@@ -1,5 +1,5 @@
 -- =============================================================================
--- 畢專加強版：配送時間軸、家屬綁定、管理員統計
+-- 畢專加強版：配送時間軸、訂單擴充欄位（含歷史 family_elder_links，App 未使用）
 -- 在 Supabase SQL Editor 執行（需已有 orders / profiles）
 -- =============================================================================
 
@@ -151,12 +151,7 @@ using (
 );
 
 -- 9) 管理員可讀 profiles（統計用）
-drop policy if exists "profiles_select_admin" on public.profiles;
-create policy "profiles_select_admin"
-on public.profiles for select
-using (
-  exists (
-    select 1 from public.profiles p
-    where p.id = auth.uid() and p.role::text = 'admin'
-  )
-);
+-- 注意：不可在 profiles 政策內再 SELECT profiles，會 42P17 無限遞迴。
+-- 請改跑 supabase/migrations/20260613120000_fix_profiles_rls_recursion.sql
+-- drop policy if exists "profiles_select_admin" on public.profiles;
+-- create policy "profiles_select_admin" ...

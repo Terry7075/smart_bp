@@ -11,8 +11,9 @@ import 'package:smart_bp/features/assistant/domain/assistant_message.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_reply.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_shop_intent.dart';
 import 'package:smart_bp/features/assistant/domain/assistant_snapshot.dart';
+import 'package:smart_bp/features/assistant/domain/assistant_chat_mode.dart';
 
-/// 統一小幫手：輕鬆語氣；自行判斷要不要查系統／帶路。
+/// 統一小幫手：代購／藥單／帶路走規則；閒聊與未命中規則由 Gemini 兜底。
 class AssistantReplyOrchestrator {
   AssistantReplyOrchestrator({
     AssistantReplyService? rules,
@@ -35,6 +36,7 @@ class AssistantReplyOrchestrator {
     required AssistantSnapshot snapshot,
     required List<AssistantMessage> conversation,
     String? userId,
+    AssistantChatMode mode = AssistantChatMode.smart,
   }) async {
     final shopClass = AssistantShopIntentClassifier.classify(question);
     if (_shopAction != null &&
@@ -77,6 +79,38 @@ class AssistantReplyOrchestrator {
     return slots != null && !slots.isEmpty;
   }
 
+  Future<AssistantReply?> _tryGemini({
+    required String question,
+    required AssistantSnapshot snapshot,
+    required List<AssistantMessage> conversation,
+  }) async {
+    final geminiResult = await _geminiCasual.chat(
+      question: question,
+      snapshot: snapshot,
+      conversation: conversation,
+      contextSummary: _rules.buildAiContextSummary(snapshot),
+    );
+    if (geminiResult.reply != null && geminiResult.reply!.trim().isNotEmpty) {
+      return AssistantReply(text: geminiResult.reply!.trim());
+    }
+    if (kDebugMode && geminiResult.error != null) {
+      debugPrint('[Assistant] Gemini fallback: ${geminiResult.error}');
+    }
+    return null;
+  }
+
+  AssistantReply _offlineFallback({
+    required String question,
+    required AssistantSnapshot snapshot,
+    required List<AssistantMessage> conversation,
+  }) {
+    return _casual.reply(
+      question: question,
+      snapshot: snapshot,
+      conversation: conversation,
+    );
+  }
+
   Future<AssistantReply> reply({
     required String question,
     required AssistantSnapshot snapshot,
@@ -85,31 +119,38 @@ class AssistantReplyOrchestrator {
     final kind = AssistantIntent.classify(question);
 
     if (kind == AssistantQueryKind.casual) {
-      try {
-        final ai = await _geminiCasual.chat(
-          question: question,
-          snapshot: snapshot,
-          conversation: conversation,
-        );
-        if (ai != null && ai.trim().isNotEmpty) {
-          return AssistantReply(text: ai.trim());
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('[Assistant] Gemini casual fallback: $e');
-        }
-      }
-
-      return _casual.reply(
+      final gemini = await _tryGemini(
+        question: question,
+        snapshot: snapshot,
+        conversation: conversation,
+      );
+      if (gemini != null) return gemini;
+      return _offlineFallback(
         question: question,
         snapshot: snapshot,
         conversation: conversation,
       );
     }
 
-    final factual = _rules.reply(question, snapshot);
+    final matched = _rules.replyWithMatch(question, snapshot);
+    if (matched.ruleMatched) {
+      return AssistantTone.warmify(
+        matched.reply,
+        kind: kind,
+        snapshot: snapshot,
+        question: question,
+      );
+    }
+
+    final gemini = await _tryGemini(
+      question: question,
+      snapshot: snapshot,
+      conversation: conversation,
+    );
+    if (gemini != null) return gemini;
+
     return AssistantTone.warmify(
-      factual,
+      matched.reply,
       kind: kind,
       snapshot: snapshot,
       question: question,
