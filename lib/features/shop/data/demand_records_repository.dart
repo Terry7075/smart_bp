@@ -5,6 +5,7 @@ import 'package:smart_bp/features/shop/domain/fulfillment_status.dart';
 import 'package:smart_bp/features/shop/domain/supply_line_snapshot.dart';
 import 'package:smart_bp/features/shop/data/shop_orders_repository.dart';
 
+import 'package:smart_bp/features/shared/elder_phone_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 final class DemandRecordItem {
@@ -68,6 +69,8 @@ final class DemandRecord {
     this.locationName,
     this.orderId,
     required this.updatedAt,
+    this.elderDisplayName,
+    this.elderPhone,
   });
 
   final String id;
@@ -78,6 +81,8 @@ final class DemandRecord {
   final String? locationName;
   final String? orderId;
   final DateTime updatedAt;
+  final String? elderDisplayName;
+  final String? elderPhone;
 
   List<DemandRecordItem> get activeItems =>
       items.where((i) => !i.cancelled).toList();
@@ -125,7 +130,7 @@ final class DemandRecordsRepository {
     required List<({String productName, int quantity, String? productId, double? unitPrice})> lines,
   }) async {
     final draft = await getOrCreateDraft(userId: userId);
-    if (draft == null) throw const AuthException('無法建立需求草稿');
+    if (draft == null) throw const AuthException('無法建立採買清單');
 
     for (final line in lines) {
       await _client.from('demand_record_items').insert({
@@ -150,21 +155,94 @@ final class DemandRecordsRepository {
     required List<SupplyLineSnapshot> lines,
   }) async {
     final draft = await getOrCreateDraft(userId: userId);
-    if (draft == null) throw const AuthException('無法建立需求草稿');
+    if (draft == null) throw const AuthException('無法建立採買清單');
 
     for (final line in lines) {
-      await _client.from('demand_record_items').insert({
-        ...line.toInsertMap(),
-        'demand_record_id': draft.id,
-      });
+      await _insertDemandItemResilient(draftId: draft.id, line: line);
     }
 
+    await _touchDraft(draft.id);
+
+    return (await _loadRecordById(draft.id))!;
+  }
+
+  Future<void> _insertDemandItemResilient({
+    required String draftId,
+    required SupplyLineSnapshot line,
+  }) async {
+    final attempts = <Map<String, dynamic>>[
+      {
+        ...line.toDemandRecordItemMap(),
+        'demand_record_id': draftId,
+      },
+      {
+        'demand_record_id': draftId,
+        'product_name': line.productName,
+        'quantity': line.quantity,
+        if (line.productId.trim().isNotEmpty) 'product_id': line.productId.trim(),
+        if (line.unitPrice != null) 'unit_price': line.unitPrice,
+        if (line.brand != null && line.brand!.isNotEmpty) 'brand': line.brand,
+        if (line.spec != null && line.spec!.isNotEmpty) 'spec': line.spec,
+        if (line.unitLabel != null && line.unitLabel!.isNotEmpty)
+          'unit_label': line.unitLabel,
+        if (line.category != null && line.category!.isNotEmpty)
+          'category': line.category,
+        if (line.supplyCategoryKey != null && line.supplyCategoryKey!.isNotEmpty)
+          'supply_category_key': line.supplyCategoryKey,
+        if (line.templateOptionId != null && line.templateOptionId!.isNotEmpty)
+          'template_option_id': line.templateOptionId,
+        if (line.referenceNote != null && line.referenceNote!.isNotEmpty)
+          'reference_note': line.referenceNote,
+      },
+      {
+        'demand_record_id': draftId,
+        'product_name': line.productName,
+        'quantity': line.quantity,
+      },
+    ];
+
+    PostgrestException? lastError;
+    for (final row in attempts) {
+      try {
+        await _client.from('demand_record_items').insert(row);
+        return;
+      } on PostgrestException catch (e) {
+        lastError = e;
+        if (kDebugMode) {
+          debugPrint('[DemandRecords] demand item insert retry: ${e.message}');
+        }
+      }
+    }
+    throw AuthException(
+      '寫入採買清單失敗：${lastError?.message ?? '未知錯誤'}',
+    );
+  }
+
+  Future<void> _touchDraft(String draftId) async {
     await _client
         .from('demand_records')
         .update({'updated_at': DateTime.now().toUtc().toIso8601String()})
-        .eq('id', draft.id);
+        .eq('id', draftId);
+  }
 
-    return (await _loadRecordById(draft.id))!;
+  static SupplyLineSnapshot _snapshotFromDraftItem(DemandRecordItem item) {
+    final name = item.productName.trim();
+    final productId = (item.productId ?? '').trim();
+    return SupplyLineSnapshot(
+      productId: productId.isNotEmpty
+          ? productId
+          : ShopOrdersRepository.draftProductIdFor(name),
+      productName: name.isEmpty ? '（未命名）' : name,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      brand: item.brand,
+      spec: item.spec,
+      unitLabel: item.unitLabel,
+      category: item.category,
+      supplyCategoryKey: item.supplyCategoryKey,
+      templateOptionId: item.templateOptionId,
+      referenceNote: item.referenceNote,
+    );
   }
 
   /// 寫入結構化品項；失敗時進離線佇列（與小幫手／語音路徑一致）。
@@ -189,7 +267,7 @@ final class DemandRecordsRepository {
       }
       final draft = await getOrCreateDraft(userId: userId);
       if (draft == null) {
-        throw const AuthException('無法建立需求草稿');
+        throw const AuthException('無法建立採買清單');
       }
       return draft;
     }
@@ -217,14 +295,66 @@ final class DemandRecordsRepository {
     return _loadRecordById(draft.id);
   }
 
+  Future<DemandRecord?> removeDraftItemById({
+    required String userId,
+    required String itemId,
+  }) async {
+    final draft = await getOrCreateDraft(userId: userId);
+    if (draft == null) return null;
+
+    final belongs = draft.items.any((i) => i.id == itemId && !i.cancelled);
+    if (!belongs) return draft;
+
+    await _client
+        .from('demand_record_items')
+        .update({'cancelled': true})
+        .eq('id', itemId);
+
+    await _client
+        .from('demand_records')
+        .update({'updated_at': DateTime.now().toUtc().toIso8601String()})
+        .eq('id', draft.id);
+
+    return _loadRecordById(draft.id);
+  }
+
+  Future<DemandRecord?> updateDraftItemQuantity({
+    required String userId,
+    required String itemId,
+    required int quantity,
+  }) async {
+    if (quantity < 1) {
+      return removeDraftItemById(userId: userId, itemId: itemId);
+    }
+
+    final draft = await getOrCreateDraft(userId: userId);
+    if (draft == null) return null;
+
+    final belongs = draft.items.any((i) => i.id == itemId && !i.cancelled);
+    if (!belongs) return draft;
+
+    await _client
+        .from('demand_record_items')
+        .update({'quantity': quantity})
+        .eq('id', itemId);
+
+    await _client
+        .from('demand_records')
+        .update({'updated_at': DateTime.now().toUtc().toIso8601String()})
+        .eq('id', draft.id);
+
+    return _loadRecordById(draft.id);
+  }
+
   /// 將目前草稿轉為正式 `orders` 並標記 submitted。
   Future<String> submitDraftToOrders({
     required String userId,
     required ShopOrdersRepository ordersRepo,
+    String? elderNote,
   }) async {
     final draft = await getOrCreateDraft(userId: userId);
     if (draft == null) {
-      throw const AuthException('無法讀取需求草稿');
+      throw const AuthException('無法讀取採買清單');
     }
     final active = draft.activeItems;
     if (active.isEmpty) {
@@ -234,31 +364,20 @@ final class DemandRecordsRepository {
     final orderId = await ordersRepo.createOrderFromDraftLines(
       userId: userId,
       locationPointId: draft.locationPointId,
+      elderNote: elderNote,
       lines: [
-        for (final i in active)
-          SupplyLineSnapshot(
-            productId: i.productId ?? '',
-            productName: i.productName,
-            quantity: i.quantity,
-            unitPrice: i.unitPrice,
-            brand: i.brand,
-            spec: i.spec,
-            unitLabel: i.unitLabel,
-            category: i.category,
-            supplyCategoryKey: i.supplyCategoryKey,
-            templateOptionId: i.templateOptionId,
-            referenceNote: i.referenceNote,
-          ),
+        for (final i in active) _snapshotFromDraftItem(i),
       ],
     );
 
     final now = DateTime.now().toUtc().toIso8601String();
-    await _client.from('demand_records').update({
-      'status': 'submitted',
-      'order_id': orderId,
-      'submitted_at': now,
-      'updated_at': now,
-    }).eq('id', draft.id);
+    final trimmedNote = elderNote?.trim();
+    await _markDemandRecordSubmitted(
+      draftId: draft.id,
+      orderId: orderId,
+      updatedAt: now,
+      elderNote: trimmedNote,
+    );
 
     final elderLabel = await _elderDisplayName(userId);
     final summary = active
@@ -358,7 +477,24 @@ final class DemandRecordsRepository {
       final r = _parseRecordRow(Map<String, dynamic>.from(e));
       if (r != null) out.add(r);
     }
-    return out;
+    final userIds = out.map((r) => r.userId).toSet();
+    final names = await _fetchElderNames(userIds);
+    final phones = await _fetchElderPhones(userIds);
+    return [
+      for (final r in out)
+        DemandRecord(
+          id: r.id,
+          userId: r.userId,
+          status: r.status,
+          items: r.items,
+          locationPointId: r.locationPointId,
+          locationName: r.locationName,
+          orderId: r.orderId,
+          updatedAt: r.updatedAt,
+          elderDisplayName: names[r.userId],
+          elderPhone: phones[r.userId],
+        ),
+    ];
   }
 
   Future<DemandRecord?> _loadRecordById(String id) async {
@@ -430,16 +566,114 @@ final class DemandRecordsRepository {
     );
   }
 
-  Future<String> _elderDisplayName(String userId) async {
+  Future<void> _markDemandRecordSubmitted({
+    required String draftId,
+    required String orderId,
+    required String updatedAt,
+    String? elderNote,
+  }) async {
+    final attempts = <Map<String, dynamic>>[
+      {
+        'status': 'submitted',
+        'order_id': orderId,
+        'submitted_at': updatedAt,
+        'updated_at': updatedAt,
+        if (elderNote != null && elderNote.isNotEmpty) 'note': elderNote,
+      },
+      {
+        'status': 'submitted',
+        'order_id': orderId,
+        'updated_at': updatedAt,
+        if (elderNote != null && elderNote.isNotEmpty) 'note': elderNote,
+      },
+      {
+        'status': 'submitted',
+        'order_id': orderId,
+        'updated_at': updatedAt,
+      },
+    ];
+
+    PostgrestException? lastError;
+    for (final patch in attempts) {
+      try {
+        await _client.from('demand_records').update(patch).eq('id', draftId);
+        return;
+      } on PostgrestException catch (e) {
+        lastError = e;
+        if (kDebugMode) {
+          debugPrint('[DemandRecords] mark submitted retry: ${e.message}');
+        }
+      }
+    }
+
+    // 訂單已建立時，盡力把草稿標成 submitted，避免長輩重送造成重複單。
     try {
-      final row = await _client
+      await _client.from('demand_records').update({
+        'status': 'submitted',
+        'order_id': orderId,
+        'updated_at': updatedAt,
+      }).eq('id', draftId);
+      return;
+    } on PostgrestException catch (e) {
+      lastError = e;
+    }
+
+    if (kDebugMode) {
+      debugPrint(
+        '[DemandRecords] order $orderId created but draft $draftId not marked submitted',
+      );
+    }
+    throw AuthException('更新採買清單狀態失敗：${lastError?.message ?? '未知錯誤'}');
+  }
+
+  Future<String> _elderDisplayName(String userId) async {
+    final names = await _fetchElderNames({userId});
+    return names[userId] ?? '長輩';
+  }
+
+  Future<Map<String, String>> _fetchElderNames(Set<String> userIds) async {
+    if (userIds.isEmpty) return {};
+    try {
+      final res = await _client
           .from('profiles')
-          .select('name')
-          .eq('id', userId)
-          .maybeSingle();
-      final name = row?['name']?.toString().trim();
-      if (name != null && name.isNotEmpty) return '$name 長輩';
-    } catch (_) {}
-    return '長輩';
+          .select('id,name')
+          .inFilter('id', userIds.toList());
+      final map = <String, String>{};
+      for (final e in List<dynamic>.from(res as List? ?? const [])) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        final id = m['id']?.toString();
+        final name = m['name']?.toString().trim();
+        if (id != null && name != null && name.isNotEmpty) {
+          map[id] = name;
+        }
+      }
+      return map;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<Map<String, String?>> _fetchElderPhones(Set<String> userIds) async {
+    if (userIds.isEmpty) return {};
+    try {
+      final res = await _client
+          .from('profiles')
+          .select('id,phone')
+          .inFilter('id', userIds.toList());
+      final map = <String, String?>{};
+      for (final e in List<dynamic>.from(res as List? ?? const [])) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        final id = m['id']?.toString();
+        final phone = m['phone']?.toString().trim();
+        if (id != null) {
+          map[id] = ElderPhoneUtils.normalizeForDial(phone);
+        }
+      }
+      return map;
+    } catch (_) {
+      return {};
+    }
   }
 }

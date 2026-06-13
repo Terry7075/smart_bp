@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_bp/features/assistant/data/assistant_shop_action_service.dart';
-import 'package:smart_bp/features/profile/profile_provider.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_provider.dart';
 
@@ -77,7 +76,7 @@ final class AdminOrderStats {
     required this.pendingCount,
     required this.processingCount,
     required this.completedCount,
-    required this.stuckCount,
+    required this.activeCount,
     required this.hotProducts,
     required this.draftDemandCount,
   });
@@ -86,42 +85,29 @@ final class AdminOrderStats {
   final int pendingCount;
   final int processingCount;
   final int completedCount;
-  final int stuckCount;
+  /// 進行中需求（待接單 + 已接單／採買中），志工待處理總量。
+  final int activeCount;
   final List<({String name, int qty})> hotProducts;
 
   /// 語音／小幫手尚未送出的 demand_records 草稿數。
   final int draftDemandCount;
 }
 
-/// 據點管理者／志工共用：優先志工可見範圍，admin 帳號則拉全站。
+/// 志工端數據總覽：訂單列表（依志工 RLS 可見範圍）。
 final adminOrdersProvider = FutureProvider<List<ShopOrderListRow>>((ref) async {
   final repo = ref.read(shopOrdersRepositoryProvider);
-  final profile = await ref.watch(profileProvider.future);
-  if (profile?.isAdmin == true) {
-    try {
-      return await repo.listOrdersForAdmin(limit: 200);
-    } catch (_) {
-      // admin RLS 未開時降級
-    }
-  }
   return repo.listOrdersWithItemsForVolunteer(limit: 200);
 });
 
 final adminStatsProvider = FutureProvider<AdminOrderStats>((ref) async {
   final orders = await ref.read(adminOrdersProvider.future);
-  final now = DateTime.now();
-  var pending = 0, processing = 0, completed = 0, stuck = 0;
+  var pending = 0, processing = 0, completed = 0;
   final productQty = <String, int>{};
 
   for (final o in orders) {
     if (o.status == 'pending') pending++;
     if (o.status == 'processing') processing++;
     if (o.status == 'completed') completed++;
-    if (o.status != 'completed' &&
-        o.status != 'cancelled' &&
-        now.difference(o.createdAt).inHours >= 24) {
-      stuck++;
-    }
     for (final it in o.items) {
       productQty[it.productName] = (productQty[it.productName] ?? 0) + it.quantity;
     }
@@ -142,7 +128,7 @@ final adminStatsProvider = FutureProvider<AdminOrderStats>((ref) async {
     pendingCount: pending,
     processingCount: processing,
     completedCount: completed,
-    stuckCount: stuck,
+    activeCount: pending + processing,
     hotProducts: hot.take(5).map((e) => (name: e.key, qty: e.value)).toList(),
     draftDemandCount: draftDemands,
   );

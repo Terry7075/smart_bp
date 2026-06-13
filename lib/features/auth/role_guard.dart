@@ -63,9 +63,7 @@ class RoleGuard extends ConsumerWidget {
 
     return switch (requiredRole) {
       RoleGuardTarget.elder => profile.isElder,
-      RoleGuardTarget.volunteer => profile.isVolunteerHub,
-      RoleGuardTarget.family => profile.isFamily,
-      RoleGuardTarget.admin => profile.isAdmin,
+      RoleGuardTarget.volunteer => profile.isVolunteer,
     };
   }
 
@@ -79,25 +77,20 @@ class RoleGuard extends ConsumerWidget {
 
     final shouldBeHere = switch (requiredRole) {
       RoleGuardTarget.elder => profile.isElder,
-      RoleGuardTarget.volunteer => profile.isVolunteerHub,
-      RoleGuardTarget.family => profile.isFamily,
-      RoleGuardTarget.admin => profile.isAdmin,
+      RoleGuardTarget.volunteer => profile.isVolunteer,
     };
     if (shouldBeHere) return;
 
-    final target = switch (profile.role) {
-      Profile.kRoleVolunteer => '/volunteer-dashboard',
-      Profile.kRoleFamily => '/family/home',
-      Profile.kRoleAdmin => '/volunteer-dashboard?tab=3',
-      _ => '/home',
-    };
+    final target = profile.isVolunteer
+        ? '/volunteer-dashboard'
+        : '/home';
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (context.mounted) context.go(target);
     });
   }
 }
 
-enum RoleGuardTarget { elder, volunteer, family, admin }
+enum RoleGuardTarget { elder, volunteer }
 
 /// 角色確認前的占位畫面（與 router 的 splash 風格一致）。
 class _RoleGuardSplash extends StatelessWidget {

@@ -30,10 +30,6 @@ where schemaname = 'public'
   and tablename = 'demand_record_items'
   and indexname = 'demand_record_items_client_request_id_key';
 
--- 5) 家屬綁定表
-select 'family_elder_links' as check_name, count(*)::int as row_count
-from public.family_elder_links;
-
 -- 6) FCM device_tokens（Android 推播）
 select 'device_tokens' as check_name, count(*)::int as row_count
 from public.device_tokens;

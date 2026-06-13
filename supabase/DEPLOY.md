@@ -130,7 +130,7 @@ Dashboard → **Edge Functions** → **Deploy a new function**：
 | A1 | [`orders_schema.sql`](orders_schema.sql) | `orders`／`order_items` 本體與 RLS（柑仔店正式單） |
 | A2 | [`chapter5_shop_assistant_schema.sql`](chapter5_shop_assistant_schema.sql) | `demand_records`、`price_references`、`location_points` 等 |
 | A3 | [`order_line_items_shopping_snapshot.sql`](order_line_items_shopping_snapshot.sql) | 採買快照欄位（今日清單 RPC 依賴） |
-| A4 | [`graduation_enhancement_schema.sql`](graduation_enhancement_schema.sql) | `family_elder_links`、家屬角色 RLS（家屬 Demo 必跑） |
+| A4 | [`graduation_enhancement_schema.sql`](graduation_enhancement_schema.sql) | 配送時間軸、`order_delivery_events`、訂單擴充欄位 |
 | A5 | [`assistant_chat_schema.sql`](assistant_chat_schema.sql) | 小幫手對話歷史（選做，未跑則歷史功能不可用） |
 
 > 若專案已跑過用藥等 migration，**勿重跑** `supabase/migrations/` 內既有檔；僅補跑上方 A 段缺漏與下方 B 段物資遷移。
@@ -142,7 +142,7 @@ Dashboard → **Edge Functions** → **Deploy a new function**：
 | B1 | `20260601000000_product_catalog_and_intelligence.sql` — 建立 `product_categories` 等表 |
 | B2 | `20260601500000_product_catalog_seed.sql` — 種子分類／品牌（`20260602` 的 `product_items` 依賴此資料） |
 | B3 | `20260602000000_group_buy_collaboration.sql` — SKU、澄清、今日清單、履行 RPC |
-| B4 | `20260603000000_volunteer_hub_unified_role.sql` — 志工／admin 合一 |
+| B4 | `20260603000000_volunteer_hub_unified_role.sql` — 志工端 RLS |
 | B5 | `20260604000000_demand_records_submitted_at.sql` — 與 B3 開頭相同，可省略或重跑（idempotent） |
 | B6 | `20260605000000_shop_backend_gaps.sql` — `client_request_id` 冪等鍵、`recommend_brands` GRANT |
 | B7 | `20260606000000_android_fcm_tokens.sql` — `device_tokens` 複合索引（Android FCM 查詢） |
@@ -191,11 +191,9 @@ supabase functions deploy assistant_casual_chat --no-verify-jwt
 
 未啟用時 App 仍可手動刷新，但 Demo 即時性會失效。
 
-## 志工／據點管理者合一（無獨立管理員 App）
+## 志工端權限
 
-執行 `supabase/migrations/20260603000000_volunteer_hub_unified_role.sql` 後，**志工與 admin 角色**皆進入 `/volunteer-dashboard`；數據總覽為第 4 個 Tab。舊 `/admin/dashboard` 會自動導向該 Tab。
-
-畢專 Demo 建議：新帳號註冊時勾選「我是社區志工」即可，不必另建 admin。
+執行 `supabase/migrations/20260603000000_volunteer_hub_unified_role.sql` 後，志工可存取物資訂單與數據總覽。App 僅區分 **長輩** 與 **志工** 兩種登入角色。
 
 ---
 

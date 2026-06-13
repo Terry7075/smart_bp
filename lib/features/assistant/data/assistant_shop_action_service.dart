@@ -32,10 +32,10 @@ class AssistantShopActionService {
   static AssistantNavAction _navPrices([String? searchQuery]) {
     final q = searchQuery?.trim();
     if (q == null || q.isEmpty) {
-      return const AssistantNavAction(label: '全聯價格參考', route: '/shop/prices');
+      return const AssistantNavAction(label: '常用品參考價', route: '/shop/prices');
     }
     return AssistantNavAction(
-      label: '全聯價格參考',
+      label: '常用品參考價',
       route: '/shop/prices',
       queryParameters: {'q': q},
     );
@@ -167,13 +167,13 @@ class AssistantShopActionService {
       }
       DemandRecord record;
       if (snapshots.isNotEmpty) {
-        record = await _demandRepo.addSnapshotLines(
+        record = await _demandRepo.addSnapshotLinesResilient(
           userId: userId,
           lines: snapshots,
         );
       } else {
         record = await _demandRepo.getOrCreateDraft(userId: userId) ??
-            (throw const AuthException('無法建立需求草稿'));
+            (throw const AuthException('無法建立採買清單'));
       }
       if (legacy.isNotEmpty) {
         record = await _demandRepo.addLines(userId: userId, lines: legacy);
@@ -182,7 +182,7 @@ class AssistantShopActionService {
           .map((i) => '${i.productName}×${i.quantity}')
           .join('、');
       return AssistantReply(
-        text: '好，已幫您記在需求草稿裡：$summary。\n'
+        text: '好，已幫您記在採買清單裡：$summary。\n'
             '請到柑仔店按「送出給志工」，或跟我說「我剛剛說要買什麼」查看。',
         actions: const [_navShopSubmit, _navShopOrders],
       );
@@ -197,7 +197,7 @@ class AssistantShopActionService {
         );
       }
       return AssistantReply(
-        text: '目前無法連線，已離線暫存您的需求。\n連線恢復後會寫入草稿，請到柑仔店按「送出給志工」。',
+        text: '目前無法連線，已離線暫存您的需求。\n連線恢復後會寫入採買清單，請到柑仔店按「送出給志工」。',
         actions: const [_navShop],
       );
     }
@@ -217,7 +217,7 @@ class AssistantShopActionService {
     if (ref == null) {
       return AssistantReply(
         text: '目前參考表裡還找不到「$name」的價格，'
-            '您可以到全聯價格參考頁搜尋，或到柑仔店看目錄。',
+            '您可以到常用品參考價頁搜尋，或到柑仔店看目錄。',
         actions: [_navPrices(name), _navShop],
       );
     }
@@ -240,15 +240,15 @@ class AssistantShopActionService {
     try {
       final draft = await _demandRepo.getOrCreateDraft(userId: userId);
       if (draft != null && draft.activeItems.isNotEmpty) {
-        buf.writeln('【草稿需求】');
+        buf.writeln('【採買清單】');
         for (final i in draft.activeItems) {
           buf.writeln('• ${i.productName} × ${i.quantity}');
         }
       } else {
-        buf.writeln('【草稿需求】尚無項目。');
+        buf.writeln('【採買清單】尚無項目。');
       }
     } catch (_) {
-      buf.writeln('【草稿需求】暫時讀不到。');
+      buf.writeln('【採買清單】暫時讀不到。');
     }
 
     if (snapshot.recentOrders.isNotEmpty) {
@@ -284,12 +284,12 @@ class AssistantShopActionService {
       final left = updated?.activeItems ?? const [];
       if (left.isEmpty) {
         return AssistantReply(
-          text: '已將「$name」從草稿移除（或找不到該品項）。',
+          text: '已將「$name」從採買清單移除（或找不到該品項）。',
           actions: const [_navShopOrders],
         );
       }
       return AssistantReply(
-        text: '已處理取消「$name」。目前草稿還有：'
+        text: '已處理取消「$name」。目前採買清單還有：'
             '${left.map((i) => '${i.productName}×${i.quantity}').join('、')}。',
         actions: const [_navShopOrders, _navShop],
       );

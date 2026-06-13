@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
 
-/// 訂單配送垂直時間軸（長輩／家屬／志工共用）。
+/// 訂單配送垂直時間軸（長輩／志工共用）。
 class OrderDeliveryTimeline extends StatelessWidget {
   const OrderDeliveryTimeline({
     super.key,
@@ -20,11 +20,12 @@ class OrderDeliveryTimeline extends StatelessWidget {
   }
 
   static IconData _iconFor(String type) {
+    if (ShopOrderStatus.isProcuringMilestone(type)) {
+      return Icons.shopping_cart_checkout_outlined;
+    }
     return switch (type) {
       ShopOrderStatus.created => Icons.send_outlined,
       ShopOrderStatus.accepted => Icons.volunteer_activism_outlined,
-      ShopOrderStatus.purchasing => Icons.shopping_basket_outlined,
-      ShopOrderStatus.delivering => Icons.local_shipping_outlined,
       ShopOrderStatus.delivered => Icons.home_outlined,
       ShopOrderStatus.issue => Icons.warning_amber_outlined,
       _ => Icons.circle_outlined,

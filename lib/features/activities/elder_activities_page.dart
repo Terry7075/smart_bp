@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_bp/features/activities/activity_models.dart';
 import 'package:smart_bp/features/activities/activity_provider.dart';
+import 'package:smart_bp/features/shop/data/community_procurement_day.dart';
 
 const Color _kElderGreen = Color(0xFF2E7D32);
 const Color _kDotGreen = Color(0xFF43A047);
+const Color _kProcurementOrange = Color(0xFFE65100);
 
 /// 長輩端：社區活動日曆。有活動的日子顯示綠點，點該日看當天活動。
 class ElderActivitiesPage extends ConsumerStatefulWidget {
@@ -52,7 +54,12 @@ class _ElderActivitiesPageState extends ConsumerState<ElderActivitiesPage> {
         onRetry: () => ref.read(communityEventsProvider.notifier).refresh(),
       ),
       data: (events) {
-        final byDay = groupEventsByDay(events);
+        final merged = CommunityProcurementDay.mergeEvents(
+          events,
+          year: _visibleMonth.year,
+          month: _visibleMonth.month,
+        );
+        final byDay = groupEventsByDay(merged);
         final selectedEvents = byDay[_dayKey(_selectedDay)] ?? const [];
 
         return RefreshIndicator(
@@ -130,13 +137,16 @@ class _MonthCalendar extends StatelessWidget {
     }
     for (var day = 1; day <= daysInMonth; day++) {
       final date = DateTime(visibleMonth.year, visibleMonth.month, day);
-      final hasEvents = (eventsByDay[date]?.isNotEmpty) ?? false;
+      final dayEvents = eventsByDay[date] ?? const [];
+      final hasEvents = dayEvents.isNotEmpty;
+      final hasProcurement = dayEvents.any(CommunityProcurementDay.isVirtualEvent);
       final isSelected = _dayKey(selectedDay) == date;
       final isToday = today == date;
       cells.add(
         _DayCell(
           day: day,
           hasEvents: hasEvents,
+          hasProcurement: hasProcurement,
           isSelected: isSelected,
           isToday: isToday,
           onTap: () => onSelectDay(date),
@@ -237,6 +247,7 @@ class _DayCell extends StatelessWidget {
   const _DayCell({
     required this.day,
     required this.hasEvents,
+    required this.hasProcurement,
     required this.isSelected,
     required this.isToday,
     required this.onTap,
@@ -244,6 +255,7 @@ class _DayCell extends StatelessWidget {
 
   final int day;
   final bool hasEvents;
+  final bool hasProcurement;
   final bool isSelected;
   final bool isToday;
   final VoidCallback onTap;
@@ -283,7 +295,9 @@ class _DayCell extends StatelessWidget {
             height: 8,
             decoration: BoxDecoration(
               color: hasEvents
-                  ? (isSelected ? Colors.white : _kDotGreen)
+                  ? (isSelected
+                      ? Colors.white
+                      : (hasProcurement ? _kProcurementOrange : _kDotGreen))
                   : Colors.transparent,
               shape: BoxShape.circle,
             ),
@@ -382,6 +396,7 @@ class _EventCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isProcurement = CommunityProcurementDay.isVirtualEvent(event);
     return Material(
       color: Colors.white,
       elevation: 2,
@@ -393,6 +408,27 @@ class _EventCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (isProcurement)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                color: _kProcurementOrange.withValues(alpha: 0.12),
+                child: const Row(
+                  children: [
+                    Icon(Icons.shopping_basket_outlined,
+                        color: _kProcurementOrange, size: 22),
+                    SizedBox(width: 8),
+                    Text(
+                      '每週四固定採購',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: _kProcurementOrange,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             if (event.hasPhoto)
               AspectRatio(
                 aspectRatio: 16 / 9,

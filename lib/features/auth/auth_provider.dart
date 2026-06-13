@@ -1,5 +1,9 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+/// Google OAuth 完成後回跳 App 的深連結（須同步寫入 iOS／Android 與 Supabase Redirect URLs）。
+const String kOAuthRedirectUrl = 'smartbp://login-callback/';
 
 /// 「明德 e 達人」使用者角色（RBAC）。
 ///
@@ -10,13 +14,7 @@ enum UserRole {
   elder('elder'),
 
   /// 社區志工：須持村辦公室發放的邀請碼才能註冊。
-  volunteer('volunteer'),
-
-  /// 家屬：可綁定長輩、查看代購進度。
-  family('family'),
-
-  /// 管理員：物資統計後台。
-  admin('admin');
+  volunteer('volunteer');
 
   const UserRole(this.dbValue);
 
@@ -123,6 +121,8 @@ class AuthNotifier extends Notifier<Session?> {
   Future<void> signInWithGoogle() async {
     await Supabase.instance.client.auth.signInWithOAuth(
       OAuthProvider.google,
+      redirectTo: kIsWeb ? null : kOAuthRedirectUrl,
+      authScreenLaunchMode: LaunchMode.externalApplication,
     );
   }
 

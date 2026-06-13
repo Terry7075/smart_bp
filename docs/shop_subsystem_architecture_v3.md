@@ -19,10 +19,7 @@ flowchart LR
 | 角色 | 登入 | 物資相關能力 |
 |------|------|----------------|
 | 長輩 | `elder` | 柑仔店、需求單、小幫手、推薦、訂單追蹤 |
-| 志工 | `volunteer` | 訂單執行、今日採買清單、履行操作、數據總覽 Tab |
-
-- `admin`：僅 RLS／測試相容；UI 導向志工 Hub `?tab=3`。  
-- `family`：家屬看單延伸，非第五章主軸。
+| 志工 | `volunteer` | 物資訂單、今日採買清單、履行操作、數據總覽 Tab |
 
 ---
 
@@ -54,7 +51,7 @@ flowchart LR
 | 入口 | 內容 |
 |------|------|
 | `/volunteer-dashboard` Tab 0–2 | 藥單、批次代領、監測（他組） |
-| `/volunteer-dashboard?tab=3` | 數據總覽（原 admin 儀表板能力） |
+| `/volunteer-dashboard?tab=3` | 數據總覽 |
 | `/volunteer/shop-orders` | 物資訂單、今日採買、履行 |
 
 **不包含**：志工採買主流程中的 GPS 路線規劃（`purchase_route_planner` 保留程式、不列成果）。
@@ -68,7 +65,7 @@ flowchart LR
 | `chapter5_shop_assistant_schema.sql` | demand、price、location、chat 檢視 |
 | `20260601000000_product_catalog_and_intelligence.sql` | 商品語意、推薦 |
 | `20260602000000_group_buy_collaboration.sql` | 採買聚合、澄清、履行 |
-| `20260603000000_volunteer_hub_unified_role.sql` | volunteer+admin RLS |
+| `20260603000000_volunteer_hub_unified_role.sql` | 志工端 RLS |
 | Edge `parse_shop_nlu` | 低信心 NLU 補強 |
 | Edge `send_shop_push` | 長輩送出需求時 App invoke；原生 FCM 未接 |
 | `shop_utterance_handler` | 柑仔店／需求輸入與 Hybrid NLU 統一入口 |
@@ -80,8 +77,8 @@ flowchart LR
 
 | 項目 | v2 敘述 | v3（現行） |
 |------|---------|------------|
-| 角色數 | 長輩 / 志工 / admin 三端 | **長輩 + 志工**（admin 併入 Hub） |
-| 管理後台 | `/admin/dashboard` 獨立 | 志工 Tab 4 + 路由跳轉 |
+| 角色數 | 長輩 / 志工 / admin 三端 | **僅長輩 + 志工** |
+| 數據總覽 | `/admin/dashboard` 獨立 | 志工主控台 Tab 3 |
 | NLU | 規則式為主 | **Hybrid** + 澄清 + 可選 Edge |
 | 採買組織 | 路線規劃強調 | **今日採買清單 RPC** |
 | 推播 | 規劃中 | Edge 有、App **未接** |

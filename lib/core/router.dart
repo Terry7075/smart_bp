@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:smart_bp/features/admin/presentation/admin_dashboard_page.dart';
 import 'package:smart_bp/features/assistant/presentation/assistant_page.dart';
-import 'package:smart_bp/features/family/presentation/family_home_page.dart';
 import 'package:smart_bp/features/shop/presentation/shop_order_detail_page.dart';
 import 'package:smart_bp/features/auth/login_page.dart';
 import 'package:smart_bp/features/health_ocr/health_scan_page.dart';
@@ -114,7 +113,14 @@ GoRouter get appRouter =>
           path: '/volunteer-dashboard',
           builder: (context, state) {
             final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
-            return VolunteerDashboard(initialTab: tab.clamp(0, 3));
+            // tab=3：物資代購 → 數據總覽（口試 Demo 沿用舊參數）
+            if (tab == 3) {
+              return const VolunteerDashboard(
+                openShopSection: true,
+                initialShopTab: 1,
+              );
+            }
+            return VolunteerDashboard(initialHealthTab: tab.clamp(0, 2));
           },
         ),
         GoRoute(
@@ -142,10 +148,6 @@ GoRouter get appRouter =>
             final id = state.pathParameters['orderId'] ?? '';
             return ShopOrderDetailPage(orderId: id);
           },
-        ),
-        GoRoute(
-          path: '/family/home',
-          builder: (context, state) => const FamilyHomePage(),
         ),
         GoRoute(
           path: '/admin/dashboard',
@@ -225,12 +227,7 @@ class _RoleDecisionPageState extends ConsumerState<_RoleDecisionPage> {
     final currentUid = Supabase.instance.client.auth.currentUser?.id;
     if (currentUid == null || profile.id != currentUid) return;
 
-    final target = switch (profile.role) {
-      Profile.kRoleVolunteer => '/volunteer-dashboard',
-      Profile.kRoleFamily => '/family/home',
-      Profile.kRoleAdmin => '/volunteer-dashboard?tab=3',
-      _ => '/home',
-    };
+    final target = profile.isVolunteer ? '/volunteer-dashboard' : '/home';
 
     // 導航成功後才設 _navigated，避免 post-frame 時 widget 已 dispose 卻永遠卡住 splash。
     WidgetsBinding.instance.addPostFrameCallback((_) {

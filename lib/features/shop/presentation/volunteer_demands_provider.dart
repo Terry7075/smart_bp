@@ -1,8 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:smart_bp/core/notification_service.dart';
 import 'package:smart_bp/features/assistant/data/assistant_shop_action_service.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
-import 'package:smart_bp/features/profile/profile_provider.dart';
 import 'package:smart_bp/features/shop/data/demand_records_repository.dart';
 import 'package:smart_bp/shared/debug/realtime_latency_tracker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -48,8 +46,6 @@ final volunteerDemandDraftsProvider =
   ref.watch(authStateChangesProvider);
   final repo = ref.watch(demandRecordsRepositoryProvider);
   final client = Supabase.instance.client;
-  final profile = ref.watch(profileProvider).value;
-  final isVolunteerHub = profile?.isVolunteerHub == true;
   var baselineSet = false;
 
   Future<List<DemandRecord>> reload() async {
@@ -60,21 +56,9 @@ final volunteerDemandDraftsProvider =
     if (!baselineSet) {
       notify.setBaseline(result);
       baselineSet = true;
-      return result;
-    }
-
-    if (isVolunteerHub) {
-      final fresh = notify.detectNewOrUpdated(result);
-      for (final d in fresh) {
-        final name = d.locationName ?? '據點';
-        final count = d.activeItems.length;
-        await NotificationService.instance.showOrderStatusNotification(
-          title: '有新的代購需求',
-          body: '$name 長輩更新需求（$count 項）',
-          route: '/volunteer/shop-orders',
-          notificationId: 310000 + (d.id.hashCode.abs() % 80000),
-        );
-      }
+    } else {
+      // 僅同步 baseline；長輩未送出草稿不推播志工（隱私）。
+      notify.detectNewOrUpdated(result);
     }
     return result;
   }

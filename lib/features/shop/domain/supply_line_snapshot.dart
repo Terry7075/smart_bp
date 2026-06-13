@@ -61,7 +61,8 @@ final class SupplyLineSnapshot {
     return _isUuid(productId) ? productId : null;
   }
 
-  Map<String, dynamic> toInsertMap() => {
+  /// 寫入 `order_items` 的快照欄位（不含 demand 專用欄位）。
+  Map<String, dynamic> toOrderItemMap() => {
         'product_id': productId,
         'product_name': productName,
         'quantity': quantity,
@@ -82,6 +83,11 @@ final class SupplyLineSnapshot {
         if (imageUrl != null && imageUrl!.isNotEmpty) 'image_url': imageUrl,
         if (referenceNote != null && referenceNote!.isNotEmpty)
           'reference_note': referenceNote,
+      };
+
+  /// 寫入 `demand_record_items`（含履行狀態與標準化欄位）。
+  Map<String, dynamic> toDemandRecordItemMap() => {
+        ...toOrderItemMap(),
         if (_isUuid(categoryId)) 'category_id': categoryId,
         if (_isUuid(brandId)) 'brand_id': brandId,
         if (_isUuid(parseProductItemId(productId, explicit: productItemId)))

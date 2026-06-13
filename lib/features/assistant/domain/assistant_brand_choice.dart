@@ -7,6 +7,7 @@ class AssistantBrandChoice {
     this.subtitle,
     this.priceHint,
     this.imageUrl,
+    this.fallbackEmoji,
     this.sendMessageOnTap,
   });
 
@@ -16,6 +17,9 @@ class AssistantBrandChoice {
   final String? subtitle;
   final String? priceHint;
   final String? imageUrl;
+
+  /// 網路圖載入失敗時的離線示意（emoji），Demo 必備。
+  final String? fallbackEmoji;
   final String? sendMessageOnTap;
 
   Map<String, dynamic> toJson() => {
@@ -25,6 +29,7 @@ class AssistantBrandChoice {
         if (subtitle != null) 'subtitle': subtitle,
         if (priceHint != null) 'price_hint': priceHint,
         if (imageUrl != null) 'image_url': imageUrl,
+        if (fallbackEmoji != null) 'fallback_emoji': fallbackEmoji,
         if (sendMessageOnTap != null) 'send_message_on_tap': sendMessageOnTap,
       };
 
@@ -36,6 +41,7 @@ class AssistantBrandChoice {
       subtitle: json['subtitle']?.toString(),
       priceHint: json['price_hint']?.toString(),
       imageUrl: json['image_url']?.toString(),
+      fallbackEmoji: json['fallback_emoji']?.toString(),
       sendMessageOnTap: json['send_message_on_tap']?.toString(),
     );
   }

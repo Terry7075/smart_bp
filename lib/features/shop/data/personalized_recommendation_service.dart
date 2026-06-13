@@ -1,4 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:smart_bp/features/shop/data/elder_supply_templates.dart';
 import 'package:smart_bp/features/shop/data/product_catalog.dart';
 import 'package:smart_bp/features/shop/data/recommendation_engine.dart';
 import 'package:smart_bp/features/shop/domain/recommendation_card.dart';
@@ -55,7 +56,45 @@ class PersonalizedRecommendationService {
     } catch (_) {
       // fallback local
     }
-    return _localCards(categoryKey);
+    if (categoryKey != null) return _localCards(categoryKey);
+    return _defaultDemoCards();
+  }
+
+  /// 無分類篩選時的預設三卡（口試 Demo 必備示意圖）。
+  RecommendationCardSet _defaultDemoCards() {
+    final keys = ['tissue', 'milk', 'egg'];
+    final kinds = [
+      RecommendationCardKind.frequent,
+      RecommendationCardKind.budget,
+      RecommendationCardKind.volunteerPick,
+    ];
+    RecommendationCard? pick(String key, RecommendationCardKind kind) {
+      final cat = ElderSupplyTemplates.findCategoryByKey(key);
+      if (cat == null) return null;
+      final opt = cat.options.firstWhere(
+        (o) => !o.isOther && !o.isUnspecified,
+        orElse: () => cat.options.first,
+      );
+      return RecommendationCard(
+        kind: kind,
+        productItemId: opt.templateProductId,
+        displayName: opt.displayName,
+        reason: switch (kind) {
+          RecommendationCardKind.frequent => '熱門選項',
+          RecommendationCardKind.budget => '價格較親民',
+          RecommendationCardKind.volunteerPick => '志工常推薦',
+        },
+        refPrice: opt.refPrice,
+        templateOptionId: opt.id,
+        imageUrl: opt.imageUrl,
+      );
+    }
+
+    return RecommendationCardSet(
+      frequent: pick(keys[0], kinds[0]),
+      budget: pick(keys[1], kinds[1]),
+      volunteerPick: pick(keys[2], kinds[2]),
+    );
   }
 
   RecommendationCardSet _localCards(String? categoryKey) {
@@ -64,6 +103,7 @@ class PersonalizedRecommendationService {
     if (brands.isEmpty) return const RecommendationCardSet();
 
     RecommendationCard card(BrandRecommendation b, RecommendationCardKind k) {
+      final opt = ElderSupplyTemplates.findOptionByTemplateId(b.templateOptionId);
       return RecommendationCard(
         kind: k,
         productItemId: b.brandId,
@@ -76,6 +116,7 @@ class PersonalizedRecommendationService {
         refPrice: b.refPrice,
         brandId: b.brandId,
         templateOptionId: b.templateOptionId,
+        imageUrl: opt?.imageUrl,
       );
     }
 

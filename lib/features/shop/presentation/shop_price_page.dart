@@ -13,7 +13,7 @@ final priceReferencesListProvider =
   return repo.listWithFallback();
 });
 
-/// 全聯價格參考頁（第五章 5.3.1）。
+/// 常用品項參考價頁（第五章 5.3.1）。
 class ShopPricePage extends ConsumerStatefulWidget {
   const ShopPricePage({super.key, this.initialQuery});
 
@@ -56,7 +56,7 @@ class _ShopPricePageState extends ConsumerState<ShopPricePage> {
         backgroundColor: _green,
         foregroundColor: Colors.white,
         title: const Text(
-          '全聯價格參考',
+          '常用品參考價',
           style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
         ),
         leading: IconButton(
@@ -82,6 +82,18 @@ class _ShopPricePageState extends ConsumerState<ShopPricePage> {
               onChanged: (_) => setState(() {}),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              '價格由社區志工依全聯門市常見品項人工整理，僅供參考；'
+              '實際以志工採買當日門市為準。',
+              style: TextStyle(
+                fontSize: 15,
+                color: Colors.grey.shade800,
+                height: 1.4,
+              ),
+            ),
+          ),
           Expanded(
             child: async.when(
               loading: () =>
@@ -97,13 +109,6 @@ class _ShopPricePageState extends ConsumerState<ShopPricePage> {
                 ),
               ),
               data: (list) {
-                final usingLocalFallback = list.any(
-                  (p) =>
-                      p.sourceNote == '柑仔店目錄' ||
-                      p.sourceNote == '常見參考' ||
-                      p.id.startsWith('local-') ||
-                      p.id.startsWith('catalog-'),
-                );
                 final filtered = list.where((p) {
                   if (q.isEmpty) return true;
                   return p.productName.toLowerCase().contains(q) ||
@@ -125,24 +130,10 @@ class _ShopPricePageState extends ConsumerState<ShopPricePage> {
                 }
                 return ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                  itemCount: filtered.length + (usingLocalFallback ? 1 : 0),
+                  itemCount: filtered.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, i) {
-                    if (usingLocalFallback && i == 0) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text(
-                          '以下為柑仔店目錄與常見品項參考價，實際以全聯門市為準。',
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: Colors.grey.shade800,
-                            height: 1.35,
-                          ),
-                        ),
-                      );
-                    }
-                    final idx = usingLocalFallback ? i - 1 : i;
-                    final p = filtered[idx];
+                    final p = filtered[i];
                     return Card(
                       child: ListTile(
                         title: Text(
@@ -156,8 +147,9 @@ class _ShopPricePageState extends ConsumerState<ShopPricePage> {
                           [
                             if (p.category != null && p.category!.isNotEmpty)
                               p.category!,
-                            if (p.sourceNote != null && p.sourceNote!.isNotEmpty)
-                              p.sourceNote!,
+                            if (p.displaySourceNote != null &&
+                                p.displaySourceNote!.isNotEmpty)
+                              p.displaySourceNote!,
                           ].join(' · '),
                           style: const TextStyle(fontSize: 16),
                         ),

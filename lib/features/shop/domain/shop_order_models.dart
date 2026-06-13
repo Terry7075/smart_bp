@@ -1,3 +1,5 @@
+import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
+
 /// 配送時間軸一筆事件（`order_delivery_events`）。
 final class OrderDeliveryEvent {
   const OrderDeliveryEvent({
@@ -75,6 +77,11 @@ final class ShopOrderListRow {
 
   int get totalQuantity =>
       items.fold<int>(0, (sum, e) => sum + e.quantity);
+
+  /// 是否已標記代購中（含舊版採買中／配送中事件）。
+  bool get hasProcuringMilestone => deliveryEvents.any(
+        (e) => ShopOrderStatus.isProcuringMilestone(e.eventType),
+      );
 
   /// 時間軸顯示用：若尚無事件，至少顯示「已送出」。
   List<OrderDeliveryEvent> get timelineEvents {

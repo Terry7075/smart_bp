@@ -13,7 +13,6 @@ import 'package:smart_bp/features/shop/presentation/shop_products_provider.dart'
 import 'package:smart_bp/features/shop/presentation/shop_frequent_products_provider.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_realtime_provider.dart';
 import 'package:smart_bp/features/shop/data/px_mart_links.dart';
-import 'package:smart_bp/features/shop/presentation/widgets/shop_supply_wizard.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/shop_manual_voice_section.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/shop_personalized_recommendations.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/shop_primary_demand_section.dart';
@@ -104,7 +103,7 @@ class ShopPage extends ConsumerWidget {
                 value: 'orders',
                 child: ListTile(
                   leading: Icon(Icons.receipt_long),
-                  title: Text('我的需求單', style: TextStyle(fontSize: 17)),
+                  title: Text('我的需求進度', style: TextStyle(fontSize: 17)),
                   contentPadding: EdgeInsets.zero,
                 ),
               ),
@@ -202,36 +201,6 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
     return total;
   }
 
-  void _onManualVoiceItemAdded(ShopProduct product, int quantity) {
-    setState(() {
-      _manualProducts.add(product);
-      _quantities[product.id] = quantity;
-    });
-  }
-
-  Future<void> _launchPxMartSearchForProduct(ShopProduct product) async {
-    final uri = buildPxMartSearchResultUri(product);
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!mounted) return;
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('無法開啟全聯搜尋頁，請稍後再試')),
-      );
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已開啟全聯搜尋：${product.pxMartSearchKeyword}')),
-    );
-  }
-
-  void _removeManualProductLine(String id) {
-    if (!_isManualProductId(id)) return;
-    setState(() {
-      _manualProducts.removeWhere((p) => p.id == id);
-      _quantities.remove(id);
-    });
-  }
-
   Future<void> _submitOrder() async {
     if (_totalCount == 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先選擇至少一項商品數量')));
@@ -243,16 +212,14 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
       builder: (ctx) => AlertDialog(
         title: const Text('目錄直送確認'),
         content: const Text(
-          '這是目錄快捷送出，不經上方語音品牌確認，\n'
-          '也不會走今日採買完整履行鏈。\n\n'
-          '口試 Demo 建議用上方「語音 → 品牌 → 送出給志工」。\n\n'
+          '這是目錄快捷送出，不經上方填寫物資需求流程。\n\n'
           '仍要用目錄送出嗎？',
           style: TextStyle(fontSize: 16, height: 1.45),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('改用語音流程'),
+            child: const Text('改用上方的填寫流程'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -273,7 +240,7 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
     setState(() => _submitting = true);
     try {
       final repo = ref.read(shopOrdersRepositoryProvider);
-      final orderId = await repo.createOrder(
+      await repo.createOrder(
         userId: user.id,
         products: _allProductsForOrder,
         quantitiesByProductId: _quantities,
@@ -285,9 +252,11 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
       ref.invalidate(shopElderOrdersProvider);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已送出需求單（編號前 8 碼：${orderId.length >= 8 ? orderId.substring(0, 8) : orderId}…）\n志工可在「物資／柑仔店需求」查看'),
+          content: const Text(
+            '✅ 已送出給志工！請至「我的需求進度」查看狀態。',
+          ),
           action: SnackBarAction(
-            label: '查看我的需求',
+            label: '查看進度',
             onPressed: () {
               if (mounted) context.push('/shop/orders');
             },
@@ -305,15 +274,15 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
         _manualProducts.clear();
         _isUrgent = false;
       });
-    } on PostgrestException catch (e) {
+    } on PostgrestException catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('送出失敗：${e.message}')),
+        const SnackBar(content: Text('送出失敗，請稍後再試或聯絡志工協助。')),
       );
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('送出失敗：$e')),
+        const SnackBar(content: Text('送出失敗，請稍後再試或聯絡志工協助。')),
       );
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -361,296 +330,228 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
             children: [
               ShopPrimaryDemandSection(highlightSubmit: widget.highlightSubmit),
               const SizedBox(height: 16),
-              const ShopSupplyWizard(),
-              const SizedBox(height: 8),
               ShopPersonalizedRecommendations(
                 onAdded: () => setState(() {}),
               ),
               const SizedBox(height: 8),
               Card(
-                color: widget.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                child: const ListTile(
-                  leading: Icon(Icons.inventory_2_outlined),
-                  title: Text(
-                    '以下為參考目錄（可選）',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: Text(
-                    '口試 Demo 請用上方語音流程；目錄直送不經品牌確認',
-                    style: TextStyle(fontSize: 15),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              frequentAsync.when(
-                data: (hints) {
-                  if (hints.isEmpty) return const SizedBox.shrink();
-                  return Card(
-                    color: widget.colorScheme.tertiaryContainer.withValues(alpha: 0.4),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                elevation: 1,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
                         children: [
-                          Row(
-                            children: [
-                              Icon(Icons.history, color: widget.accent, size: 24),
-                              const SizedBox(width: 8),
-                              const Expanded(
-                                child: Text(
-                                  '常購推薦（依您的歷史訂單）',
-                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 6,
-                            children: [
-                              for (final h in hints)
-                                ActionChip(
-                                  label: Text(
-                                    '${h.productName} ×1',
-                                    style: const TextStyle(fontSize: 16),
-                                  ),
-                                  onPressed: () {
-                                    final p = _productById(h.productId);
-                                    if (p == null) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text('目錄中找不到「${h.productName}」，請用搜尋加入'),
-                                        ),
-                                      );
-                                      return;
-                                    }
-                                    _changeQty(p.id, 1);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('已加入：${p.name}')),
-                                    );
-                                  },
-                                ),
-                            ],
+                          Icon(Icons.storefront_outlined, color: widget.accent, size: 28),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              '找全聯商品',
+                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                  );
-                },
-                loading: () => const SizedBox.shrink(),
-                error: (error, stackTrace) => const SizedBox.shrink(),
+                      const SizedBox(height: 14),
+                      const ShopManualVoiceSection(),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 10),
               Card(
                 elevation: 0,
-                color: widget.colorScheme.secondaryContainer.withValues(alpha: 0.45),
                 clipBehavior: Clip.antiAlias,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Theme(
-                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                      child: ExpansionTile(
-                        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        collapsedShape: const RoundedRectangleBorder(side: BorderSide.none),
-                        shape: const RoundedRectangleBorder(side: BorderSide.none),
-                        iconColor: widget.colorScheme.onSecondaryContainer,
-                        collapsedIconColor: widget.colorScheme.onSecondaryContainer,
-                        leading: Icon(
-                          Icons.edit_note,
-                          color: widget.colorScheme.onSecondaryContainer,
-                          size: 26,
-                        ),
-                        title: Text(
-                          '想買全聯有、本站沒列的？',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 17,
-                            color: widget.colorScheme.onSecondaryContainer,
-                          ),
-                        ),
-                        subtitle: Text(
-                          _manualProducts.isEmpty
-                              ? '按住說話或打字，不用分品牌價格'
-                              : '已加入 ${_manualProducts.length} 筆（可收起）',
-                          style: TextStyle(
-                            fontSize: 14,
-                            height: 1.3,
-                            color: widget.colorScheme.onSecondaryContainer.withValues(alpha: 0.88),
-                          ),
-                        ),
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                            child: ShopManualVoiceSection(
-                              accentColor: widget.colorScheme.onSecondaryContainer,
-                              onItemAdded: _onManualVoiceItemAdded,
-                            ),
-                          ),
-                        ],
-                      ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                child: Theme(
+                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                    childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                    leading: Icon(Icons.inventory_2_outlined, color: widget.accent, size: 26),
+                    title: const Text(
+                      '參考目錄',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
                     ),
-                    if (_manualProducts.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Divider(height: 1, color: widget.colorScheme.outlineVariant),
-                            const SizedBox(height: 10),
-                            Text(
-                              '語音／隨選品項（${_manualProducts.length}）',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: widget.colorScheme.onSecondaryContainer,
-                              ),
+                    children: [
+                      frequentAsync.when(
+                        data: (hints) {
+                          if (hints.isEmpty) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  '常購推薦',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 6,
+                                  children: [
+                                    for (final h in hints)
+                                      ActionChip(
+                                        label: Text('${h.productName} ×1', style: const TextStyle(fontSize: 15)),
+                                        onPressed: () {
+                                          final p = _productById(h.productId);
+                                          if (p == null) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text('目錄中找不到「${h.productName}」')),
+                                            );
+                                            return;
+                                          }
+                                          _changeQty(p.id, 1);
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text('已加入目錄清單：${p.name}')),
+                                          );
+                                        },
+                                      ),
+                                  ],
+                                ),
+                                const Divider(height: 24),
+                              ],
                             ),
-                            const SizedBox(height: 8),
-                            for (final p in _manualProducts)
-                              _ManualLineTile(
-                                product: p,
-                                quantity: _quantities[p.id] ?? 0,
-                                colorScheme: widget.colorScheme,
-                                onAdd: () => _changeQty(p.id, 1),
-                                onRemove: () => _changeQty(p.id, -1),
-                                onDeleteLine: () => _removeManualProductLine(p.id),
-                                onOpenPxSearch: () => _launchPxMartSearchForProduct(p),
+                          );
+                        },
+                        loading: () => const SizedBox.shrink(),
+                        error: (_, __) => const SizedBox.shrink(),
+                      ),
+                      TextField(
+                        controller: _searchController,
+                        onChanged: (value) => setState(() {
+                          _search = value;
+                          _pageIndex = 0;
+                        }),
+                        decoration: InputDecoration(
+                          hintText: '篩選品項',
+                          prefixIcon: const Icon(Icons.filter_list),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            _CategoryChip(
+                              label: '全部',
+                              selected: _selectedCategory == '全部',
+                              onTap: () => setState(() {
+                                _selectedCategory = '全部';
+                                _pageIndex = 0;
+                              }),
+                            ),
+                            for (final category in categories)
+                              _CategoryChip(
+                                label: category,
+                                selected: _selectedCategory == category,
+                                onTap: () => setState(() {
+                                  _selectedCategory = category;
+                                  _pageIndex = 0;
+                                }),
                               ),
                           ],
                         ),
                       ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _searchController,
-                onChanged: (value) => setState(() {
-                  _search = value;
-                  _pageIndex = 0;
-                }),
-                decoration: InputDecoration(
-                  hintText: '搜尋商品名稱或規格',
-                  prefixIcon: const Icon(Icons.search),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _CategoryChip(
-                      label: '全部',
-                      selected: _selectedCategory == '全部',
-                      onTap: () => setState(() {
-                        _selectedCategory = '全部';
-                        _pageIndex = 0;
-                      }),
-                    ),
-                    for (final category in categories)
-                      _CategoryChip(
-                        label: category,
-                        selected: _selectedCategory == category,
-                        onTap: () => setState(() {
-                          _selectedCategory = category;
-                          _pageIndex = 0;
-                        }),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '共 ${filtered.length} 件',
+                              style: TextStyle(color: widget.colorScheme.onSurfaceVariant),
+                            ),
+                          ),
+                          Text(
+                            _showAll
+                                ? '全部顯示'
+                                : '第 ${clampedPageIndex + 1} / $totalPages 頁',
+                            style: TextStyle(color: widget.colorScheme.onSurfaceVariant),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton(
+                            onPressed: () => setState(() {
+                              _showAll = !_showAll;
+                              _pageIndex = 0;
+                            }),
+                            child: Text(_showAll ? '改分頁' : '全部顯示'),
+                          ),
+                        ],
                       ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '共 ${filtered.length} 件商品',
-                      style: TextStyle(color: widget.colorScheme.onSurfaceVariant),
-                    ),
-                  ),
-                  Text(
-                    _showAll
-                        ? '全部顯示'
-                        : '第 ${clampedPageIndex + 1} / $totalPages 頁（每頁 $_pageSize）',
-                    style: TextStyle(color: widget.colorScheme.onSurfaceVariant),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: () => setState(() {
-                      _showAll = !_showAll;
-                      _pageIndex = 0;
-                    }),
-                    child: Text(_showAll ? '改分頁' : '全部顯示'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final width = constraints.maxWidth;
-                  final crossAxisCount = width >= 1400 ? 4 : (width >= 1000 ? 3 : 2);
-                  const gridSpacing = 12.0;
-                  final cellWidth =
-                      (width - gridSpacing * (crossAxisCount - 1)).clamp(0.0, double.infinity) /
-                      crossAxisCount;
-                  // 主圖 1:1（約 cellWidth − 左右 padding），下方為品名／價格／按鈕。
-                  // childAspectRatio = 寬／高 → 數值愈「小」格子愈高；reserve 含大字體與原價列緩衝。
-                  final textScaler = MediaQuery.textScalerOf(context);
-                  final scaleBump =
-                      ((textScaler.scale(14) / 14).clamp(1.0, 2.2) - 1.0) * 96.0;
-                  final belowImageReserve = 278.0 + scaleBump;
-                  final childAspectRatio = cellWidth / (cellWidth + belowImageReserve);
-                  return GridView.builder(
-                    itemCount: visible.length,
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      crossAxisSpacing: gridSpacing,
-                      mainAxisSpacing: gridSpacing,
-                      childAspectRatio: childAspectRatio,
-                    ),
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemBuilder: (context, index) {
-                      final p = visible[index];
-                      return _ProductCard(
-                        key: ValueKey<String>(p.id),
-                        product: p,
-                        accent: widget.accent,
-                        quantity: _quantities[p.id] ?? 0,
-                        onAdd: () => _changeQty(p.id, 1),
-                        onRemove: () => _changeQty(p.id, -1),
-                        onAddWhenPxSearchOpened: () => _changeQty(p.id, 1),
-                      );
-                    },
-                  );
-                },
-              ),
-              if (!_showAll && filtered.length > _pageSize)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        tooltip: '上一頁',
-                        onPressed: clampedPageIndex <= 0 ? null : () => setState(() => _pageIndex -= 1),
-                        icon: const Icon(Icons.chevron_left),
+                      const SizedBox(height: 8),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final width = constraints.maxWidth;
+                          final crossAxisCount = width >= 900 ? 3 : 2;
+                          const gridSpacing = 12.0;
+                          final cellWidth =
+                              (width - gridSpacing * (crossAxisCount - 1)).clamp(0.0, double.infinity) /
+                              crossAxisCount;
+                          final textScaler = MediaQuery.textScalerOf(context);
+                          final scaleBump =
+                              ((textScaler.scale(14) / 14).clamp(1.0, 2.2) - 1.0) * 96.0;
+                          final belowImageReserve = 278.0 + scaleBump;
+                          final childAspectRatio = cellWidth / (cellWidth + belowImageReserve);
+                          return GridView.builder(
+                            itemCount: visible.length,
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: crossAxisCount,
+                              crossAxisSpacing: gridSpacing,
+                              mainAxisSpacing: gridSpacing,
+                              childAspectRatio: childAspectRatio,
+                            ),
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemBuilder: (context, index) {
+                              final p = visible[index];
+                              return _ProductCard(
+                                key: ValueKey<String>(p.id),
+                                product: p,
+                                accent: widget.accent,
+                                quantity: _quantities[p.id] ?? 0,
+                                onAdd: () => _changeQty(p.id, 1),
+                                onRemove: () => _changeQty(p.id, -1),
+                                onAddWhenPxSearchOpened: () => _changeQty(p.id, 1),
+                              );
+                            },
+                          );
+                        },
                       ),
-                      Text('第 ${clampedPageIndex + 1} / $totalPages 頁'),
-                      IconButton(
-                        tooltip: '下一頁',
-                        onPressed: clampedPageIndex >= totalPages - 1 ? null : () => setState(() => _pageIndex += 1),
-                        icon: const Icon(Icons.chevron_right),
-                      ),
+                      if (!_showAll && filtered.length > _pageSize)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              IconButton(
+                                onPressed: clampedPageIndex <= 0
+                                    ? null
+                                    : () => setState(() => _pageIndex -= 1),
+                                icon: const Icon(Icons.chevron_left),
+                              ),
+                              Text('第 ${clampedPageIndex + 1} / $totalPages 頁'),
+                              IconButton(
+                                onPressed: clampedPageIndex >= totalPages - 1
+                                    ? null
+                                    : () => setState(() => _pageIndex += 1),
+                                icon: const Icon(Icons.chevron_right),
+                              ),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
                 ),
+              ),
             ],
           ),
         ),
-          SafeArea(
+          if (_totalCount > 0)
+            SafeArea(
             top: false,
             child: Container(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -741,7 +642,7 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
                                 height: 18,
                                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                               )
-                            : Text(_isUrgent ? '送出（緊急）' : '送出需求'),
+                            : Text(_isUrgent ? '目錄購物車（緊急）' : '目錄購物車送出'),
                       ),
                     ],
                   ),
@@ -750,116 +651,6 @@ class _ShopOrderViewState extends ConsumerState<_ShopOrderView> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ManualLineTile extends StatelessWidget {
-  const _ManualLineTile({
-    required this.product,
-    required this.quantity,
-    required this.colorScheme,
-    required this.onAdd,
-    required this.onRemove,
-    required this.onDeleteLine,
-    required this.onOpenPxSearch,
-  });
-
-  final ShopProduct product;
-  final int quantity;
-  final ColorScheme colorScheme;
-  final VoidCallback onAdd;
-  final VoidCallback onRemove;
-  final VoidCallback onDeleteLine;
-  final VoidCallback onOpenPxSearch;
-
-  @override
-  Widget build(BuildContext context) {
-    final url = product.sourceUrl;
-    final priceText = product.unitPrice != null
-        ? 'NT\$${product.unitPrice!.toStringAsFixed(0)}／件'
-        : '單價未填（以全聯為準）';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: colorScheme.surface.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(product.name, style: const TextStyle(fontWeight: FontWeight.w600, height: 1.25)),
-              if (product.spec != null && product.spec!.trim().isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  '規格：${product.spec}',
-                  style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
-                ),
-              ],
-              const SizedBox(height: 4),
-              Text(
-                '全聯搜尋：${product.pxMartSearchKeyword}'
-                '${product.pxSearchKeywordOverride != null && product.pxSearchKeywordOverride!.trim().isNotEmpty ? '（自訂關鍵字）' : '（由品名組合）'}',
-                style: TextStyle(fontSize: 13, color: colorScheme.tertiary),
-              ),
-              const SizedBox(height: 4),
-              Text(priceText, style: TextStyle(fontSize: 13, color: colorScheme.primary)),
-              if (url != null && url.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                SelectableText(
-                  url,
-                  style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
-                  maxLines: 2,
-                ),
-              ] else ...[
-                const SizedBox(height: 4),
-                Text(
-                  '無商品連結（志工可依品名在全聯搜尋）',
-                  style: TextStyle(fontSize: 12, color: colorScheme.outline),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: onOpenPxSearch,
-                  icon: const Icon(Icons.open_in_new, size: 18),
-                  label: const Text('全聯搜尋'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: colorScheme.primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  OutlinedButton(
-                    onPressed: quantity > 0 ? onRemove : null,
-                    style: OutlinedButton.styleFrom(minimumSize: const Size(40, 36), padding: EdgeInsets.zero),
-                    child: const Text('－'),
-                  ),
-                  const SizedBox(width: 8),
-                  Text('$quantity', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: onAdd,
-                    style: FilledButton.styleFrom(minimumSize: const Size(40, 36), padding: EdgeInsets.zero),
-                    child: const Text('＋'),
-                  ),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: onDeleteLine,
-                    icon: const Icon(Icons.delete_outline, size: 20),
-                    label: const Text('移除'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

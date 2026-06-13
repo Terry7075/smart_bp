@@ -1,5 +1,11 @@
 /// 小幫手／柑仔店多輪代購槽位狀態。
-enum SupplyDialogueStep { awaitBrand, awaitQty, awaitOtherNote }
+enum SupplyDialogueStep {
+  awaitBrand,
+  awaitCapacity,
+  awaitCustomCapacity,
+  awaitQty,
+  awaitOtherNote,
+}
 
 final class PendingSupplyDialogue {
   const PendingSupplyDialogue({
@@ -10,6 +16,7 @@ final class PendingSupplyDialogue {
     this.rawUtterance,
     this.step = SupplyDialogueStep.awaitBrand,
     this.selectedOptionId,
+    this.selectedBrand,
     this.categoryImageUrl,
   });
 
@@ -20,11 +27,13 @@ final class PendingSupplyDialogue {
   final String? rawUtterance;
   final SupplyDialogueStep step;
   final String? selectedOptionId;
+  final String? selectedBrand;
   final String? categoryImageUrl;
 
   PendingSupplyDialogue copyWith({
     SupplyDialogueStep? step,
     String? selectedOptionId,
+    String? selectedBrand,
     int? quantity,
     String? unitLabel,
   }) {
@@ -36,6 +45,7 @@ final class PendingSupplyDialogue {
       rawUtterance: rawUtterance,
       step: step ?? this.step,
       selectedOptionId: selectedOptionId ?? this.selectedOptionId,
+      selectedBrand: selectedBrand ?? this.selectedBrand,
       categoryImageUrl: categoryImageUrl,
     );
   }
@@ -48,6 +58,7 @@ final class PendingSupplyDialogue {
         if (rawUtterance != null) 'raw_utterance': rawUtterance,
         'step': step.name,
         if (selectedOptionId != null) 'selected_option_id': selectedOptionId,
+        if (selectedBrand != null) 'selected_brand': selectedBrand,
         if (categoryImageUrl != null) 'category_image_url': categoryImageUrl,
       };
 
@@ -65,6 +76,7 @@ final class PendingSupplyDialogue {
       rawUtterance: json['raw_utterance']?.toString(),
       step: step,
       selectedOptionId: json['selected_option_id']?.toString(),
+      selectedBrand: json['selected_brand']?.toString(),
       categoryImageUrl: json['category_image_url']?.toString(),
     );
   }

@@ -1,8 +1,11 @@
 import 'package:smart_bp/core/shop_push_invoker.dart';
 import 'package:smart_bp/features/shop/domain/supply_line_snapshot.dart';
+import 'package:smart_bp/features/shared/elder_phone_utils.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_models.dart';
+import 'package:smart_bp/features/shop/data/community_procurement_day.dart';
 import 'package:smart_bp/features/shop/domain/shop_order_status.dart';
+import 'package:smart_bp/features/shop/domain/fulfillment_status.dart';
 import 'package:smart_bp/features/shop/domain/shop_product.dart';
 
 final class ShopOrdersRepository {
@@ -49,32 +52,6 @@ order_delivery_events(id, order_id, event_type, note, created_at)
     return _rowsFromList(raw, enrichElder: false);
   }
 
-  /// 家屬：讀取綁定長輩的訂單（依 RLS `orders_select_family`）。
-  Future<List<ShopOrderListRow>> listOrdersForFamilyLinkedElder({
-    required String elderUserId,
-    int limit = 40,
-  }) async {
-    final raw = await _client
-        .from('orders')
-        .select(_orderSelect)
-        .eq('user_id', elderUserId)
-        .order('created_at', ascending: false)
-        .limit(limit);
-
-    return _rowsFromList(raw, enrichElder: false);
-  }
-
-  /// 管理員：全部訂單（依 RLS `orders_select_admin`）。
-  Future<List<ShopOrderListRow>> listOrdersForAdmin({int limit = 200}) async {
-    final raw = await _client
-        .from('orders')
-        .select(_orderSelect)
-        .order('created_at', ascending: false)
-        .limit(limit);
-
-    return _rowsFromList(raw, enrichElder: true);
-  }
-
   Future<ShopOrderListRow?> fetchOrderById(String orderId) async {
     final raw = await _client
         .from('orders')
@@ -98,13 +75,20 @@ order_delivery_events(id, order_id, event_type, note, created_at)
       final qty = quantitiesByProductId[p.id] ?? 0;
       if (qty <= 0) continue;
       totalAmount += (p.unitPrice ?? 0) * qty;
+      final brand = RegExp(r'【([^】]+)】').firstMatch(p.name)?.group(1)?.trim();
+      final coreName = p.name
+          .replaceAll(RegExp(r'【[^】]*】'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
       final row = <String, dynamic>{
         'product_id': p.id,
-        'product_name': p.name,
+        'product_name': coreName.isNotEmpty ? coreName : p.name,
         'quantity': qty,
         'price_at_time': (p.unitPrice ?? 0).round(),
         'category': p.category,
         if (p.unitLabel != null && p.unitLabel!.isNotEmpty) 'unit_label': p.unitLabel,
+        if (brand != null && brand.isNotEmpty) 'brand': brand,
+        if (p.spec != null && p.spec!.isNotEmpty) 'spec': p.spec,
       };
       if (p.unitPrice != null) row['unit_price'] = p.unitPrice;
       items.add(row);
@@ -149,55 +133,216 @@ order_delivery_events(id, order_id, event_type, note, created_at)
     required String userId,
     required List<SupplyLineSnapshot> lines,
     String? locationPointId,
+    String? elderNote,
   }) async {
     if (lines.isEmpty) {
-      throw const AuthException('草稿沒有可送出的品項');
+      throw const AuthException('採買清單沒有可送出的品項');
     }
 
     var totalAmount = 0.0;
     final orderItems = <Map<String, dynamic>>[];
-    for (final line in lines) {
-      if (line.quantity <= 0) continue;
+    for (final raw in lines) {
+      if (raw.quantity <= 0) continue;
+      final line = SupplyLineSnapshot(
+        productId: raw.productId.trim().isNotEmpty
+            ? raw.productId.trim()
+            : draftProductIdFor(raw.productName),
+        productName: raw.productName.trim().isEmpty
+            ? '（未命名）'
+            : raw.productName.trim(),
+        quantity: raw.quantity,
+        unitPrice: raw.unitPrice,
+        brand: raw.brand,
+        spec: raw.spec,
+        unitLabel: raw.unitLabel,
+        category: raw.category,
+        supplyCategoryKey: raw.supplyCategoryKey,
+        templateOptionId: raw.templateOptionId,
+        referenceNote: raw.referenceNote,
+      );
       final price = line.unitPrice ?? 0;
       totalAmount += price * line.quantity;
-      orderItems.add({
-        ...line.toInsertMap(),
-        'price_at_time': price.round(),
-      });
+      orderItems.add(_orderItemRowFromLine(line, price));
+    }
+    if (orderItems.isEmpty) {
+      throw const AuthException('採買清單沒有可送出的品項');
     }
 
-    final insertRow = <String, dynamic>{
-      'user_id': userId,
-      'status': initialOrderStatus,
-      'total_amount': totalAmount.round(),
-    };
-    if (locationPointId != null && locationPointId.isNotEmpty) {
-      insertRow['location_point_id'] = locationPointId;
-    }
-
-    final inserted = await _client
-        .from('orders')
-        .insert(insertRow)
-        .select('id')
-        .single();
-
-    final orderId = inserted['id']?.toString();
-    if (orderId == null || orderId.isEmpty) {
-      throw const AuthException('建立訂單失敗');
-    }
+    final orderId = await _insertOrderRow(
+      userId: userId,
+      locationPointId: locationPointId,
+      elderNote: elderNote,
+      totalAmount: totalAmount.round(),
+    );
 
     for (final item in orderItems) {
       item['order_id'] = orderId;
     }
-    await _client.from('order_items').insert(orderItems);
+    await _insertOrderItems(orderItems);
 
+    final trimmedNote = elderNote?.trim();
     await _insertDeliveryEvent(
       orderId: orderId,
       eventType: ShopOrderStatus.created,
-      note: '長輩已送出物資需求單（含語音草稿）',
+      note: trimmedNote != null && trimmedNote.isNotEmpty
+          ? '長輩已送出物資需求單（備註：$trimmedNote）'
+          : '長輩已送出物資需求單',
     );
 
     return orderId;
+  }
+
+  static String _resolveProductId(SupplyLineSnapshot line) {
+    final id = line.productId.trim();
+    if (id.isNotEmpty) return id;
+    final template = (line.templateOptionId ?? '').trim();
+    if (template.isNotEmpty) return 'tpl:$template';
+    final key = (line.supplyCategoryKey ?? '').trim();
+    if (key.isNotEmpty) return 'cat:$key';
+    return draftProductIdFor(line.productName);
+  }
+
+  /// 小幫手／語音草稿品項無 product_id 時的穩定代碼。
+  static String draftProductIdFor(String productName) {
+    final name = productName.trim();
+    if (name.isEmpty) return 'draft:unnamed';
+    return 'draft:$name';
+  }
+
+  Map<String, dynamic> _orderItemRowFromLine(
+    SupplyLineSnapshot line,
+    double price,
+  ) {
+    final priceAtTime = (line.unitPrice ?? price).round();
+    final row = <String, dynamic>{
+      'product_id': _resolveProductId(line),
+      'product_name': line.productName,
+      'quantity': line.quantity,
+      'price_at_time': priceAtTime,
+    };
+    if (line.unitPrice != null) row['unit_price'] = line.unitPrice;
+    for (final extra in [
+      if (line.brand != null && line.brand!.isNotEmpty) ('brand', line.brand!),
+      if (line.spec != null && line.spec!.isNotEmpty) ('spec', line.spec!),
+      if (line.unitLabel != null && line.unitLabel!.isNotEmpty)
+        ('unit_label', line.unitLabel!),
+      if (line.category != null && line.category!.isNotEmpty)
+        ('category', line.category!),
+      if (line.supplyCategoryKey != null && line.supplyCategoryKey!.isNotEmpty)
+        ('supply_category_key', line.supplyCategoryKey!),
+      if (line.templateOptionId != null && line.templateOptionId!.isNotEmpty)
+        ('template_option_id', line.templateOptionId!),
+      if (line.pxProductId != null && line.pxProductId!.isNotEmpty)
+        ('px_product_id', line.pxProductId!),
+      if (line.sourceUrl != null && line.sourceUrl!.isNotEmpty)
+        ('source_url', line.sourceUrl!),
+      if (line.pxSearchKeyword != null && line.pxSearchKeyword!.isNotEmpty)
+        ('px_search_keyword', line.pxSearchKeyword!),
+      if (line.imageUrl != null && line.imageUrl!.isNotEmpty)
+        ('image_url', line.imageUrl!),
+      if (line.referenceNote != null && line.referenceNote!.isNotEmpty)
+        ('reference_note', line.referenceNote!),
+    ]) {
+      row[extra.$1] = extra.$2;
+    }
+    return row;
+  }
+
+  Future<String> _insertOrderRow({
+    required String userId,
+    String? locationPointId,
+    String? elderNote,
+    int? totalAmount,
+  }) async {
+    final base = <String, dynamic>{
+      'user_id': userId,
+      'status': initialOrderStatus,
+    };
+    if (locationPointId != null && locationPointId.isNotEmpty) {
+      base['location_point_id'] = locationPointId;
+    }
+    final trimmedNote = elderNote?.trim();
+    if (trimmedNote != null && trimmedNote.isNotEmpty) {
+      base['note'] = trimmedNote;
+    }
+
+    final attempts = <Map<String, dynamic>>[
+      if (totalAmount != null) {...base, 'total_amount': totalAmount},
+      base,
+    ];
+
+    PostgrestException? lastError;
+    for (final row in attempts) {
+      try {
+        final inserted = await _client
+            .from('orders')
+            .insert(row)
+            .select('id')
+            .single();
+        final orderId = inserted['id']?.toString();
+        if (orderId == null || orderId.isEmpty) {
+          throw const AuthException('建立訂單失敗');
+        }
+        return orderId;
+      } on PostgrestException catch (e) {
+        lastError = e;
+      }
+    }
+    throw AuthException('建立訂單失敗：${lastError?.message ?? '未知錯誤'}');
+  }
+
+  Future<void> _insertOrderItems(List<Map<String, dynamic>> items) async {
+    int priceAtTimeFor(Map<String, dynamic> item) {
+      final raw = item['price_at_time'] ?? item['unit_price'];
+      if (raw is num) return raw.round();
+      return 0;
+    }
+
+    final core = items
+        .map(
+          (item) => {
+            'order_id': item['order_id'],
+            'product_id': item['product_id'],
+            'product_name': item['product_name'],
+            'quantity': item['quantity'],
+            'price_at_time': priceAtTimeFor(item),
+            if (item['unit_price'] != null) 'unit_price': item['unit_price'],
+          },
+        )
+        .toList();
+
+    final standard = items
+        .map(
+          (item) => {
+            for (final key in const [
+              'order_id',
+              'product_id',
+              'product_name',
+              'quantity',
+              'unit_price',
+              'price_at_time',
+              'brand',
+              'spec',
+              'unit_label',
+              'category',
+            ])
+              if (item[key] != null) key: item[key],
+            if (item['price_at_time'] == null) 'price_at_time': priceAtTimeFor(item),
+          },
+        )
+        .toList();
+
+    final attempts = [items, standard, core];
+    PostgrestException? lastError;
+    for (final batch in attempts) {
+      try {
+        await _client.from('order_items').insert(batch);
+        return;
+      } on PostgrestException catch (e) {
+        lastError = e;
+      }
+    }
+    throw AuthException('寫入訂單品項失敗：${lastError?.message ?? '未知錯誤'}');
   }
 
   /// 志工接單：pending → processing + accepted 事件。
@@ -216,15 +361,79 @@ order_delivery_events(id, order_id, event_type, note, created_at)
     await _insertDeliveryEvent(
       orderId: orderId,
       eventType: ShopOrderStatus.accepted,
-      note: '志工已接單，將協助採買',
+      note: CommunityProcurementDay.elderAcceptNotice(),
       createdBy: volunteerId,
+    );
+    await _syncDemandItemsStatus(
+      orderId: orderId,
+      status: ItemFulfillmentStatus.accepted,
     );
     await _pushOrderUpdateToElder(
       orderId: orderId,
       eventType: 'order_accepted',
       title: '柑仔店需求更新',
-      bodyText: '志工已接單，正在為您採買',
+      bodyText: CommunityProcurementDay.elderAcceptNotice(),
     );
+  }
+
+  /// 志工一次接單：批次 pending → processing。
+  Future<({int accepted, int failed})> acceptPendingOrdersByVolunteer({
+    required String volunteerId,
+    required List<String> orderIds,
+  }) async {
+    var accepted = 0;
+    var failed = 0;
+    for (final orderId in orderIds) {
+      try {
+        await acceptOrderByVolunteer(
+          orderId: orderId,
+          volunteerId: volunteerId,
+        );
+        accepted++;
+      } catch (_) {
+        failed++;
+      }
+    }
+    return (accepted: accepted, failed: failed);
+  }
+
+  /// 接單／送達時同步 demand_record_items 履行狀態（與訂單級狀態對齊）。
+  Future<void> _syncDemandItemsStatus({
+    required String orderId,
+    required ItemFulfillmentStatus status,
+  }) async {
+    try {
+      final raw = await _client
+          .from('demand_records')
+          .select(
+            'demand_record_items(id, cancelled, fulfillment_status)',
+          )
+          .eq('order_id', orderId)
+          .limit(1)
+          .maybeSingle();
+      if (raw == null) return;
+      final items = raw['demand_record_items'];
+      if (items is! List) return;
+      for (final e in items) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        if (m['cancelled'] == true) continue;
+        final itemId = m['id']?.toString();
+        if (itemId == null || itemId.isEmpty) continue;
+        await _client.rpc(
+          'update_item_fulfillment',
+          params: {
+            'p_item_id': itemId,
+            'p_new_status': status.value,
+            'p_substitute_item_id': null,
+            'p_actual_unit_price': null,
+            'p_note': null,
+          },
+        );
+      }
+    } catch (_) {
+      // 目錄快捷單可能無 demand_records，略過即可。
+    }
   }
 
   /// 配送中繼步驟（不改 orders.status，只加事件）。
@@ -249,6 +458,32 @@ order_delivery_events(id, order_id, event_type, note, created_at)
     );
   }
 
+  /// 批次標記「代購中」（處理中且尚未標記的訂單）。
+  Future<int> batchMarkProcuring(List<ShopOrderListRow> orders) async {
+    var count = 0;
+    for (final o in orders) {
+      if (o.status != 'processing' || o.hasProcuringMilestone) continue;
+      await addDeliveryMilestone(
+        orderId: o.id,
+        eventType: ShopOrderStatus.procuring,
+        note: '志工已開始代購（採買與配送）',
+      );
+      count++;
+    }
+    return count;
+  }
+
+  /// 批次標記全部處理中訂單為已送達活動中心。
+  Future<int> batchCompleteDeliveries(List<ShopOrderListRow> orders) async {
+    var count = 0;
+    for (final o in orders) {
+      if (o.status != 'processing') continue;
+      await completeDelivery(orderId: o.id);
+      count++;
+    }
+    return count;
+  }
+
   /// 標記送達：processing → completed。
   Future<void> completeDelivery({
     required String orderId,
@@ -266,13 +501,17 @@ order_delivery_events(id, order_id, event_type, note, created_at)
     await _insertDeliveryEvent(
       orderId: orderId,
       eventType: ShopOrderStatus.delivered,
-      note: note ?? '物資已送達長輩',
+      note: note ?? CommunityProcurementDay.elderCompleteNotice,
+    );
+    await _syncDemandItemsStatus(
+      orderId: orderId,
+      status: ItemFulfillmentStatus.delivered,
     );
     await _pushOrderUpdateToElder(
       orderId: orderId,
       eventType: 'order_completed',
       title: '柑仔店需求更新',
-      bodyText: note ?? '物資已送達，感謝您的耐心等候',
+      bodyText: note ?? CommunityProcurementDay.elderCompleteNotice,
     );
   }
 
@@ -361,7 +600,7 @@ order_delivery_events(id, order_id, event_type, note, created_at)
           .maybeSingle();
       final elderId = row?['user_id']?.toString();
       if (elderId == null || elderId.isEmpty) return;
-      await ShopPushInvoker.instance.notifyElderAndFamily(
+      await ShopPushInvoker.instance.notifyElder(
         elderUserId: elderId,
         orderId: orderId,
         eventType: eventType,
@@ -501,7 +740,9 @@ order_delivery_events(id, order_id, event_type, note, created_at)
         final m = Map<String, dynamic>.from(e);
         final id = m['id']?.toString();
         final phone = m['phone']?.toString().trim();
-        if (id != null) map[id] = (phone != null && phone.isNotEmpty) ? phone : null;
+        if (id != null) {
+          map[id] = ElderPhoneUtils.normalizeForDial(phone);
+        }
       }
       return map;
     } catch (_) {

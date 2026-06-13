@@ -14,7 +14,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.go('/volunteer-dashboard?tab=3');
+      if (mounted) context.go('/volunteer-dashboard');
     });
   }
 

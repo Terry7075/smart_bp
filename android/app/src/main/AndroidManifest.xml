@@ -53,6 +53,13 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Supabase Google OAuth 回跳（對應 kOAuthRedirectUrl） -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="smartbp" android:host="login-callback" />
+            </intent-filter>
         </activity>
 
         <!-- google_sign_in: no extra activity needed, SDK handles OAuth internally -->

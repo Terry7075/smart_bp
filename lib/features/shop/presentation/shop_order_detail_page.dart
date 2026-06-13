@@ -8,7 +8,7 @@ import 'package:smart_bp/features/shop/presentation/shop_orders_provider.dart';
 import 'package:smart_bp/features/shop/presentation/shop_orders_realtime_provider.dart';
 import 'package:smart_bp/features/shop/presentation/widgets/order_delivery_timeline.dart';
 
-/// 訂單詳情（配送時間軸 + 品項明細，Supabase Realtime 更新）。
+/// 需求單詳情（配送時間軸 + 品項明細，Supabase Realtime 更新）。
 class ShopOrderDetailPage extends ConsumerWidget {
   const ShopOrderDetailPage({
     super.key,
@@ -32,7 +32,7 @@ class ShopOrderDetailPage extends ConsumerWidget {
         appBar: AppBar(
           backgroundColor: _green,
           foregroundColor: Colors.white,
-          title: const Text('訂單詳情', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          title: const Text('需求單詳情', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
         ),
         body: const Center(child: CircularProgressIndicator(color: _green)),
       ),
@@ -43,7 +43,9 @@ class ShopOrderDetailPage extends ConsumerWidget {
           foregroundColor: Colors.white,
           leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
         ),
-        body: Center(child: Text('讀取失敗：$e', style: const TextStyle(fontSize: 18))),
+        body: const Center(
+          child: Text('讀取失敗，請稍後再試。', style: TextStyle(fontSize: 18)),
+        ),
       ),
       data: (order) {
         if (order == null) {
@@ -71,13 +73,20 @@ class _OrderDetailBody extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.listen(shopOrderDetailStreamProvider(orderId), (prev, next) {
+      final prevStatus = prev?.value?.status;
+      final nextStatus = next.value?.status;
+      if (nextStatus != null && prevStatus != nextStatus) {
+        ref.invalidate(orderItemFulfillmentProvider(orderId));
+      }
+    });
     final fulfillmentAsync = ref.watch(orderItemFulfillmentProvider(orderId));
     return Scaffold(
       backgroundColor: ShopOrderDetailPage._cream,
       appBar: AppBar(
         backgroundColor: ShopOrderDetailPage._green,
         foregroundColor: Colors.white,
-        title: const Text('訂單詳情', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        title: const Text('需求單詳情', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, size: 28),
           onPressed: () => context.pop(),
@@ -110,14 +119,18 @@ class _OrderDetailBody extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    ShopOrderStatus.orderStatusLabel(order.status),
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: ShopOrderDetailPage._green),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
                     '共 ${order.totalQuantity} 件'
                     '${order.totalAmount != null ? ' · 參考 ${order.totalAmount} 元' : ''}',
-                    style: TextStyle(fontSize: 17, color: Colors.grey.shade700),
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: ShopOrderDetailPage._green,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '送出時間：${_formatOrderTime(order.createdAt)}',
+                    style: TextStyle(fontSize: 16, color: Colors.grey.shade700),
                   ),
                 ],
               ),
@@ -208,23 +221,17 @@ class _OrderDetailBody extends ConsumerWidget {
               ],
             ),
           ),
-          fulfillmentAsync.when(
-            data: (rows) {
-              if (rows.isEmpty) return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  '品項採買進度由志工更新；訂單狀態與品項狀態可能不同步，以志工通知為準。',
-                  style: TextStyle(fontSize: 15, color: Colors.grey.shade700, height: 1.4),
-                ),
-              );
-            },
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
-          ),
+          const SizedBox(height: 16),
+          _OrderStatusSummaryCard(order: order),
         ],
       ),
     );
+  }
+
+  static String _formatOrderTime(DateTime t) {
+    final l = t.toLocal();
+    String p2(int n) => n.toString().padLeft(2, '0');
+    return '${l.year}/${p2(l.month)}/${p2(l.day)} ${p2(l.hour)}:${p2(l.minute)}';
   }
 
   static Color _fulfillmentColor(ItemFulfillmentStatus status) {
@@ -235,6 +242,99 @@ class _OrderDetailBody extends ConsumerWidget {
       ItemFulfillmentStatus.delivered => Colors.green.shade200,
       ItemFulfillmentStatus.substituted => Colors.amber.shade100,
       ItemFulfillmentStatus.cancelled => Colors.grey.shade300,
+    };
+  }
+}
+
+class _OrderStatusSummaryCard extends StatelessWidget {
+  const _OrderStatusSummaryCard({required this.order});
+
+  final ShopOrderListRow order;
+
+  @override
+  Widget build(BuildContext context) {
+    final statusLabel = ShopOrderStatus.elderOrderStatusLabel(
+      order.status,
+      hasProcuring: order.hasProcuringMilestone,
+    );
+    final accent = _statusAccent(order.status, order.hasProcuringMilestone);
+
+    return Card(
+      color: accent.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: accent.withValues(alpha: 0.35), width: 1.5),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(_statusIcon(order.status), color: accent, size: 26),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '目前狀態',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    statusLabel,
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: accent,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '共 ${order.totalQuantity} 件'
+                    '${order.totalAmount != null ? ' · 參考 ${order.totalAmount} 元' : ''}',
+                    style: TextStyle(fontSize: 16, color: Colors.grey.shade800),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static Color _statusAccent(String status, bool hasProcuring) {
+    if (status == 'processing' && hasProcuring) {
+      return const Color(0xFF1565C0);
+    }
+    return switch (status) {
+      'pending' => const Color(0xFFE65100),
+      'processing' => const Color(0xFF1565C0),
+      'completed' => const Color(0xFF2E7D32),
+      'cancelled' => Colors.grey.shade700,
+      _ => const Color(0xFF5D4037),
+    };
+  }
+
+  static IconData _statusIcon(String status) {
+    return switch (status) {
+      'pending' => Icons.hourglass_top_rounded,
+      'processing' => Icons.local_shipping_outlined,
+      'completed' => Icons.check_circle_outline,
+      'cancelled' => Icons.cancel_outlined,
+      _ => Icons.info_outline,
     };
   }
 }

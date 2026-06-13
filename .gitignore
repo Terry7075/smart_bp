@@ -45,6 +45,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# 本機 Release APK（不進 Git，見 docs/WIRELESS_INSTALL.md）
+/releases/
+
 # Firebase（請用 docs/FCM_SETUP.md 在本機放置）
 /android/app/google-services.json
 /ios/Runner/GoogleService-Info.plist

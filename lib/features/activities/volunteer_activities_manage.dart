@@ -7,8 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:smart_bp/features/activities/activity_models.dart';
 import 'package:smart_bp/features/activities/activity_provider.dart';
+import 'package:smart_bp/features/shop/data/community_procurement_day.dart';
 
 const Color _kVolunteerBlue = Color(0xFF1565C0);
+const Color _kProcurementOrange = Color(0xFFE65100);
 
 /// 志工端：社區活動管理（新增 / 刪除，可上傳照片）。
 class VolunteerActivitiesManagePage extends ConsumerWidget {
@@ -29,54 +31,30 @@ class VolunteerActivitiesManagePage extends ConsumerWidget {
             onRetry: () => ref.read(communityEventsProvider.notifier).refresh(),
           ),
           data: (list) {
-            if (list.isEmpty) {
-              return RefreshIndicator(
-                color: _kVolunteerBlue,
-                onRefresh: () =>
-                    ref.read(communityEventsProvider.notifier).refresh(),
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.all(32),
-                  children: const [
-                    SizedBox(height: 80),
-                    Icon(Icons.event_available_outlined,
-                        size: 88, color: _kVolunteerBlue),
-                    SizedBox(height: 24),
-                    Text(
-                      '尚無活動',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        color: _kVolunteerBlue,
-                      ),
-                    ),
-                    SizedBox(height: 12),
-                    Text(
-                      '點右下角「新增活動」發布社區活動，\n長輩就能在日曆上看到。',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black54,
-                        height: 1.5,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }
+            final procurement =
+                CommunityProcurementDay.nearestUpcomingEvent();
+            final dbEvents = list
+                .where((e) => !CommunityProcurementDay.isVirtualEvent(e))
+                .toList();
+
             return RefreshIndicator(
               color: _kVolunteerBlue,
               onRefresh: () =>
                   ref.read(communityEventsProvider.notifier).refresh(),
-              child: ListView.separated(
+              child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                itemCount: list.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 12),
-                itemBuilder: (context, i) =>
-                    _ManageEventCard(event: list[i]),
+                children: [
+                  _ProcurementDayCard(event: procurement),
+                  const SizedBox(height: 16),
+                  if (dbEvents.isEmpty)
+                    const _NoVolunteerEventsHint()
+                  else
+                    for (var i = 0; i < dbEvents.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 12),
+                      _ManageEventCard(event: dbEvents[i]),
+                    ],
+                ],
               ),
             );
           },
@@ -108,6 +86,288 @@ class VolunteerActivitiesManagePage extends ConsumerWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (_) => _ActivityFormSheet(parentRef: ref),
+    );
+  }
+}
+
+class _ProcurementDayCard extends StatefulWidget {
+  const _ProcurementDayCard({required this.event});
+
+  final CommunityEvent event;
+
+  @override
+  State<_ProcurementDayCard> createState() => _ProcurementDayCardState();
+}
+
+class _ProcurementDayCardState extends State<_ProcurementDayCard> {
+  bool _expanded = false;
+
+  static const _weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+
+  @override
+  Widget build(BuildContext context) {
+    final event = widget.event;
+    final w = _weekdays[(event.eventDate.weekday - 1) % 7];
+    final isToday = CommunityProcurementDay.isProcurementDay(DateTime.now());
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: _kProcurementOrange.withValues(alpha: 0.35)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: _kProcurementOrange.withValues(alpha: 0.08),
+            child: InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                child: Row(
+                  children: [
+                    if (event.hasPhoto)
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.network(
+                          event.photoUrl!,
+                          width: 64,
+                          height: 64,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) =>
+                              const _ProcurementPhotoFallback(),
+                        ),
+                      )
+                    else
+                      const _ProcurementPhotoFallback(),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.shopping_basket_outlined,
+                                size: 18,
+                                color: _kProcurementOrange,
+                              ),
+                              const SizedBox(width: 6),
+                              const Expanded(
+                                child: Text(
+                                  '每週四固定採購',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                    color: _kProcurementOrange,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            event.title,
+                            style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            isToday
+                                ? '今天（週$w）採購日'
+                                : '最近：${event.eventDate.month}/${event.eventDate.day}（週$w）',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: _kVolunteerBlue,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: const Icon(
+                        Icons.keyboard_arrow_down,
+                        color: _kProcurementOrange,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (event.hasPhoto)
+                  AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: Image.network(
+                      event.photoUrl!,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, progress) {
+                        if (progress == null) return child;
+                        return const ColoredBox(
+                          color: Color(0xFFF0F0F0),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: _kVolunteerBlue,
+                            ),
+                          ),
+                        );
+                      },
+                      errorBuilder: (_, _, _) => const ColoredBox(
+                        color: Color(0xFFF0F0F0),
+                        child: Center(
+                          child: Icon(
+                            Icons.broken_image_outlined,
+                            size: 48,
+                            color: Colors.black26,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (event.startTime != null) ...[
+                        _ProcurementInfoLine(
+                          icon: Icons.schedule,
+                          text: event.startTime!,
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      if (event.location != null) ...[
+                        _ProcurementInfoLine(
+                          icon: Icons.location_on_outlined,
+                          text: event.location!,
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (event.description != null)
+                        Text(
+                          event.description!,
+                          style: const TextStyle(
+                            fontSize: 17,
+                            height: 1.5,
+                            color: Colors.black87,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            crossFadeState:
+                _expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 220),
+            sizeCurve: Curves.easeInOut,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProcurementPhotoFallback extends StatelessWidget {
+  const _ProcurementPhotoFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 64,
+      height: 64,
+      decoration: BoxDecoration(
+        color: _kProcurementOrange.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: const Icon(
+        Icons.storefront_outlined,
+        size: 32,
+        color: _kProcurementOrange,
+      ),
+    );
+  }
+}
+
+class _ProcurementInfoLine extends StatelessWidget {
+  const _ProcurementInfoLine({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: _kVolunteerBlue),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _NoVolunteerEventsHint extends StatelessWidget {
+  const _NoVolunteerEventsHint();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: const Column(
+        children: [
+          Icon(Icons.event_available_outlined,
+              size: 56, color: _kVolunteerBlue),
+          SizedBox(height: 12),
+          Text(
+            '尚無其他社區活動',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: _kVolunteerBlue,
+            ),
+          ),
+          SizedBox(height: 8),
+          Text(
+            '點右下角「新增活動」發布，長輩就能在日曆上看到。',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.black54,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

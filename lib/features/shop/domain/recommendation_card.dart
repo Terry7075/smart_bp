@@ -40,12 +40,14 @@ final class RecommendationCard {
       displayName: entry['display_name']?.toString() ?? '',
       reason: entry['reason']?.toString() ?? _defaultReason(kind),
       refPrice: (entry['ref_price'] as num?)?.toDouble(),
+      templateOptionId: entry['template_option_id']?.toString(),
+      imageUrl: entry['image_url']?.toString(),
     );
   }
 
   static String _defaultReason(RecommendationCardKind k) => switch (k) {
         RecommendationCardKind.frequent => '您常買這款',
-        RecommendationCardKind.budget => '全聯划算款',
+        RecommendationCardKind.budget => '價格較親民',
         RecommendationCardKind.volunteerPick => '志工常幫買',
       };
 }
