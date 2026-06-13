@@ -1,6 +1,6 @@
 {
-    "name": "mingde_transport",
-    "short_name": "mingde_transport",
+    "name": "smart_bp",
+    "short_name": "smart_bp",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

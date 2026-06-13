@@ -1,0 +1,12 @@
+# 本地開發用；部署時請在 Dashboard 設定 GEMINI_API_KEY
+[functions.process_prescription_vision]
+verify_jwt = true
+
+[functions.parse_shop_nlu]
+verify_jwt = false
+
+[functions.send_shop_push]
+verify_jwt = false
+
+[functions.assistant_casual_chat]
+verify_jwt = false

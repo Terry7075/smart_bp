@@ -1,21 +1,53 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
 .dart_tool/
-build/
-.packages
+.flutter-plugins-dependencies
 .pub-cache/
 .pub/
-.flutter-plugins
-.flutter-plugins-dependencies
+/build/
+/coverage/
+node_modules/
 
-android/.gradle/
-android/local.properties
+# Symbolication related
+app.*.symbols
 
-ios/Pods/
-ios/.symlinks/
-ios/Flutter/Flutter.framework
-ios/Flutter/Flutter.podspec
+# Obfuscation related
+app.*.map.json
 
-windows/flutter/ephemeral/
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
 
-.idea/
-.vscode/
-*.iml
+# Firebase（請用 docs/FCM_SETUP.md 在本機放置）
+/android/app/google-services.json
+/ios/Runner/GoogleService-Info.plist
+
+# Supabase CLI 暫存
+/supabase/.temp/
