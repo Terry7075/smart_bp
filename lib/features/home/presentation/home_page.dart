@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import 'package:smart_bp/features/activities/elder_activities_page.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
+import 'package:smart_bp/features/family/data/family_links_repository.dart';
+import 'package:smart_bp/features/family/presentation/family_providers.dart';
 import 'package:smart_bp/features/health/presentation/health_page.dart';
 import 'package:smart_bp/features/health_monitoring/health_monitoring_provider.dart';
 import 'package:smart_bp/features/health_monitoring/presentation/elder_monitoring_tab.dart';
@@ -185,7 +187,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         const _GreetingCard(),
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 12),
+                        const _FamilyRequestBanner(),
+                        const SizedBox(height: 8),
                         const _ActionGrid(),
                       ],
                     ),
@@ -244,6 +248,113 @@ class _HomePageState extends ConsumerState<HomePage> {
 }
 
 enum _AvatarMenu { profile, logout }
+
+/// 長者首頁：待確認的家屬綁定請求（同意才開放家屬查看代購進度）。
+///
+/// 只有在有 pending 請求時才顯示;沒有請求 / 載入中 / 出錯都收起,不干擾首頁。
+class _FamilyRequestBanner extends ConsumerWidget {
+  const _FamilyRequestBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pending = ref.watch(pendingFamilyRequestsProvider);
+    final list = pending.asData?.value ?? const [];
+    if (list.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final FamilyElderLink link in list)
+          Card(
+            color: const Color(0xFFFFF3E0),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: Color(0xFFFFB74D)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.family_restroom,
+                          color: Color(0xFFE65100), size: 28),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '有家屬想綁定您的帳號（稱謂：${link.relation}），'
+                          '同意後對方才能查看您的代購進度。',
+                          style: const TextStyle(fontSize: 18, height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF2E7D32),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          onPressed: () => _respond(context, ref, link, true),
+                          icon: const Icon(Icons.check, size: 24),
+                          label: const Text('同意',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFBF360C),
+                            side: const BorderSide(color: Color(0xFFBF360C)),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          onPressed: () => _respond(context, ref, link, false),
+                          icon: const Icon(Icons.close, size: 24),
+                          label: const Text('拒絕',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+
+  Future<void> _respond(
+    BuildContext context,
+    WidgetRef ref,
+    FamilyElderLink link,
+    bool approve,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final repo = ref.read(familyLinksRepositoryProvider);
+    try {
+      if (approve) {
+        await repo.approveLink(link.id);
+      } else {
+        await repo.rejectLink(link.id);
+      }
+      ref.invalidate(pendingFamilyRequestsProvider);
+      messenger.showSnackBar(
+        SnackBar(content: Text(approve ? '已同意家屬綁定' : '已拒絕綁定請求')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('操作失敗：$e')));
+    }
+  }
+}
 
 /// AppBar 通知小鈴鐺：有待審核藥單時顯示紅點。
 class _NotificationBellButton extends ConsumerWidget {

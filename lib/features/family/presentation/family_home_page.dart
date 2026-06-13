@@ -42,7 +42,7 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
       return;
     }
     try {
-      await ref.read(familyLinksRepositoryProvider).bindElder(
+      await ref.read(familyLinksRepositoryProvider).requestBind(
             familyUserId: uid,
             elderUserId: elderId,
             relation: _relationCtrl.text.trim(),
@@ -50,13 +50,14 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
       ref.invalidate(familyLinksProvider);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已綁定長輩，可查看代購進度')),
+        const SnackBar(content: Text('已送出綁定請求，待長輩在 App 內同意後即可查看代購進度')),
       );
       _elderIdCtrl.clear();
     } catch (e) {
       if (!mounted) return;
+      final msg = e is ArgumentError ? (e.message?.toString() ?? '$e') : '$e';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('綁定失敗：$e\n請確認已執行 graduation_enhancement_schema.sql')),
+        SnackBar(content: Text('綁定失敗：$msg')),
       );
     }
   }
@@ -92,8 +93,8 @@ class _FamilyHomePageState extends ConsumerState<FamilyHomePage> {
                 child: const Padding(
                   padding: EdgeInsets.all(14),
                   child: Text(
-                    '家屬為獨立帳號（profiles.role = family），需綁定長輩 UUID 後查看代購進度。\n'
-                    '若 Demo 未準備家屬帳號，可改由長輩本人開啟柑仔店 →「我的需求單」。',
+                    '家屬為獨立帳號（profiles.role = family），輸入長輩 UUID 送出綁定請求後，'
+                    '需由長輩在自己的 App 內按「同意」才會生效，之後即可查看代購進度。',
                     style: TextStyle(fontSize: 17, height: 1.4),
                   ),
                 ),
@@ -171,7 +172,7 @@ class _ElderLinkCardState extends ConsumerState<_ElderLinkCard> {
 
   @override
   Widget build(BuildContext context) {
-    final orders = ref.watch(familyElderOrdersProvider(widget.link.elderUserId));
+    final isPending = widget.link.status != 'active';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -203,17 +204,49 @@ class _ElderLinkCardState extends ConsumerState<_ElderLinkCard> {
                     ],
                   ),
                 ),
-                IconButton(
-                  tooltip: '重新整理',
-                  icon: const Icon(Icons.refresh),
-                  onPressed: () =>
-                      ref.invalidate(familyElderOrdersProvider(widget.link.elderUserId)),
-                ),
+                if (!isPending)
+                  IconButton(
+                    tooltip: '重新整理',
+                    icon: const Icon(Icons.refresh),
+                    onPressed: () => ref.invalidate(
+                        familyElderOrdersProvider(widget.link.elderUserId)),
+                  ),
               ],
             ),
             const Divider(height: 20),
-            // ── 訂單清單
-            orders.when(
+            if (isPending)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3E0),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFFFB74D)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.hourglass_top, color: Color(0xFFE65100)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '等待長輩在 App 內同意綁定中，同意後才能查看代購進度。',
+                        style: TextStyle(fontSize: 15, height: 1.35),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              _buildOrders(context),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrders(BuildContext context) {
+    final orders = ref.watch(familyElderOrdersProvider(widget.link.elderUserId));
+    return orders.when(
               loading: () => const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Center(child: CircularProgressIndicator()),
@@ -247,11 +280,7 @@ class _ElderLinkCardState extends ConsumerState<_ElderLinkCard> {
                   ],
                 );
               },
-            ),
-          ],
-        ),
-      ),
-    );
+            );
   }
 }
 

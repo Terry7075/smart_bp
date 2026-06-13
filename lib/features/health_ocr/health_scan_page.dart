@@ -265,7 +265,10 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
       }
     }
 
-    if (result.prescriptionId == null) {
+    // prescriptionId == null：一般本地解析（新列）。
+    // isLocalFallback：雲端配額滿改本地解析，沿用占位列 id → upsert 同一列。
+    // 兩者都要寫入完整欄位（藥名/天數/時段…），故走同一分支。
+    if (result.prescriptionId == null || result.isLocalFallback) {
       final pickupDay = volunteerRefill?.nextPickupDate ??
           _pickupDayForDb(result, medicationDaysOverride: medicationDays);
       final now = DateTime.now();
@@ -295,6 +298,9 @@ class _HealthScanPageState extends ConsumerState<HealthScanPage> {
               rawNotes: preview,
               refillStatus: refillStatus,
               photoStoragePath: photoStoragePath,
+              // 本地備援沿用占位列(原為 processing)，寫回終態避免被當處理中清理。
+              visionStatus:
+                  result.isLocalFallback ? VisionStatus.completed : null,
             );
       } catch (e) {
         print('[HealthScan] insert prescription error: $e');

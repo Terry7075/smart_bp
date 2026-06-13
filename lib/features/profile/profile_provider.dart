@@ -94,9 +94,16 @@ final profileProvider =
 class ProfileNotifier extends AsyncNotifier<Profile?> {
   @override
   Future<Profile?> build() async {
-    // 當 Supabase auth 狀態（登入 / 登出 / 切換帳號）改變時，立刻清掉舊 profile
-    // 並進 loading，避免 RoleGuard / 路由在重抓完成前仍用「上一個使用者」的 role。
+    // 只在「使用者身分真的改變」（登入 / 登出 / 切換帳號）時清掉舊 profile 重抓。
+    //
+    // 為什麼要比對 user id？Supabase 約每小時會發 `tokenRefreshed`（或 app 回前景
+    // 時觸發），使用者其實沒變。若每個事件都 invalidate，所有受 RoleGuard /
+    // 路由保護的頁面會瞬間跳回全螢幕「正在為您準備畫面…」閃一下。比對 id 後，
+    // 純 token 刷新（id 不變）就略過。
     ref.listen(authStateChangesProvider, (previous, next) {
+      final prevId = previous?.value?.session?.user.id;
+      final nextId = next.value?.session?.user.id;
+      if (prevId == nextId) return;
       state = const AsyncLoading();
       ref.invalidateSelf();
     });
@@ -165,7 +172,12 @@ class ProfileNotifier extends AsyncNotifier<Profile?> {
       }
     }
 
-    if (data == null) return null;
+    if (data == null) {
+      // 已登入卻仍取不到 profile（RLS 拒絕 / 網路問題 / 補建失敗）。
+      // 回傳 null 會讓 RoleDecisionPage / RoleGuard 永遠卡在 splash，
+      // 因此改丟錯誤，讓畫面顯示「重新讀取」按鈕。
+      throw StateError('無法載入個人資料，請確認網路後重試。');
+    }
     return Profile.fromMap(data);
   }
 

@@ -7,7 +7,8 @@
     "shop:fetch-ddg-images": "node scripts/fetch_ddg_images.mjs",
     "shop:image-proxy": "node scripts/image_proxy_server.mjs",
     "shop:px-search-thumb": "node scripts/px_search_thumb_server.mjs",
-    "assistant:ollama-proxy": "node scripts/ollama_proxy_server.mjs"
+    "assistant:ollama-proxy": "node scripts/ollama_proxy_server.mjs",
+    "drug:mirror-images": "node scripts/mirror_drug_images.mjs"
   },
   "dependencies": {
     "playwright": "latest"

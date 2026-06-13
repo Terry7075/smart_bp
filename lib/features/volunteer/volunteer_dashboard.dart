@@ -9,6 +9,7 @@ import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/health_monitoring/presentation/volunteer_monitoring_tab.dart';
 import 'package:smart_bp/features/medication/volunteer_drug_dictionary_add_page.dart';
 import 'package:smart_bp/features/volunteer/volunteer_content_manage.dart';
+import 'package:smart_bp/features/volunteer/volunteer_members_tab.dart';
 import 'package:smart_bp/features/volunteer/volunteer_batch_refill_provider.dart';
 import 'package:smart_bp/features/volunteer/volunteer_batch_refill_tab.dart';
 import 'package:smart_bp/features/volunteer/volunteer_shop_orders_page.dart';
@@ -34,7 +35,7 @@ enum _VolunteerSection { health, shop, learning, activities }
 class VolunteerDashboard extends ConsumerStatefulWidget {
   const VolunteerDashboard({super.key, this.initialTab = 0});
 
-  /// 0=藥單 1=批次代領 2=監測 3=數據總覽
+  /// 0=藥單 1=批次代領 2=監測 3=商城數據總覽(admin深連結) 4=會員管理
   final int initialTab;
 
   @override
@@ -235,7 +236,7 @@ class _VolunteerHealthSection extends ConsumerStatefulWidget {
 
   final Future<void> Function() onRefreshAll;
 
-  /// 0=藥單 1=批次代領 2=監測 3=藥典
+  /// 0=藥單 1=批次代領 2=監測 3=藥典 4=會員管理
   final int initialTab;
 
   @override
@@ -250,8 +251,8 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
   @override
   void initState() {
     super.initState();
-    final tab = widget.initialTab.clamp(0, 3);
-    _tabController = TabController(length: 4, vsync: this, initialIndex: tab);
+    final tab = widget.initialTab.clamp(0, 4);
+    _tabController = TabController(length: 5, vsync: this, initialIndex: tab);
   }
 
   @override
@@ -290,6 +291,7 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
               Tab(text: '🛵 批次代領'),
               Tab(text: '❤️ 長者監測'),
               Tab(text: '📖 新增藥典'),
+              Tab(text: '👥 會員管理'),
             ],
           ),
         ),
@@ -319,6 +321,7 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
               ),
               const VolunteerMonitoringTab(),
               const VolunteerDrugDictionaryAddPage(),
+              const VolunteerMembersTab(),
             ],
           ),
         ),

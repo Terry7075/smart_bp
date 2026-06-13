@@ -115,7 +115,8 @@ GoRouter get appRouter =>
           path: '/volunteer-dashboard',
           builder: (context, state) {
             final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
-            return VolunteerDashboard(initialTab: tab.clamp(0, 3));
+            // 0-2=健康(藥單/批次代領/監測) 3=商城數據總覽(admin深連結) 4=會員管理
+            return VolunteerDashboard(initialTab: tab.clamp(0, 4));
           },
         ),
         GoRoute(
