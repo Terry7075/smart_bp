@@ -57,6 +57,9 @@ if (file("google-services.json").exists()) {
 
 dependencies {
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
 
     // 搭配上方 compileOptions.isCoreLibraryDesugaringEnabled = true，
     // 提供 java.time / java.util.stream 等舊 Android 缺少的 API。

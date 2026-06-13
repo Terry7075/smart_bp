@@ -7,74 +7,104 @@ import '../../core/providers.dart';
 class AdminDashboardPage extends ConsumerWidget {
   const AdminDashboardPage({super.key});
 
+  void _goBack(BuildContext context) {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+      return;
+    }
+    context.go('/volunteer-dashboard?tab=3');
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final stats = ref.watch(adminDashboardStatsProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('管理員儀表板'),
-        actions: [
-          IconButton(
-            onPressed: () => context.push('/notifications'),
-            icon: const Icon(Icons.notifications),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _goBack(context);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            iconSize: 28,
+            onPressed: () => _goBack(context),
           ),
-          IconButton(
-            onPressed: () => context.push('/profile'),
-            icon: const Icon(Icons.account_circle),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        top: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-          child: stats.when(
-            data: (item) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      _MetricCard(label: '待媒合接送', value: item.pendingRideCount),
-                      _MetricCard(label: '今日行程', value: item.todayRideCount),
-                      _MetricCard(
-                          label: '今日已媒合', value: item.todayMatchedCount),
-                      _MetricCard(label: '進行中接送', value: item.inProgressCount),
-                      _MetricCard(
-                          label: '待審核司機', value: item.pendingDriverCount),
-                      _MetricCard(
+          title: const Text('管理員儀表板'),
+          actions: [
+            IconButton(
+              onPressed: () => context.push('/notifications'),
+              icon: const Icon(Icons.notifications),
+            ),
+            IconButton(
+              onPressed: () => context.push('/profile'),
+              icon: const Icon(Icons.account_circle),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+            child: stats.when(
+              data: (item) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        _MetricCard(
+                          label: '待媒合接送',
+                          value: item.pendingRideCount,
+                        ),
+                        _MetricCard(label: '今日行程', value: item.todayRideCount),
+                        _MetricCard(
+                          label: '今日已媒合',
+                          value: item.todayMatchedCount,
+                        ),
+                        _MetricCard(
+                          label: '進行中接送',
+                          value: item.inProgressCount,
+                        ),
+                        _MetricCard(
+                          label: '待審核司機',
+                          value: item.pendingDriverCount,
+                        ),
+                        _MetricCard(
                           label: '待審長期接送',
-                          value: item.pendingStandingRideCount),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton(
-                    onPressed: () => context.push('/admin/drivers'),
-                    child: const Text('司機審核'),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: () => context.push('/admin/standing'),
-                    child: const Text('長期接送審核'),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: () => context.push('/admin/match'),
-                    child: const Text('接送媒合'),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: () => context.push('/admin/live'),
-                    child: const Text('即時狀態監控'),
-                  ),
-                ],
-              );
-            },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => Center(child: Text('讀取失敗：$error')),
+                          value: item.pendingStandingRideCount,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton(
+                      onPressed: () => context.push('/admin/drivers'),
+                      child: const Text('司機審核'),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: () => context.push('/admin/standing'),
+                      child: const Text('長期接送審核'),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: () => context.push('/admin/match'),
+                      child: const Text('接送媒合'),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: () => context.push('/admin/live'),
+                      child: const Text('即時狀態監控'),
+                    ),
+                  ],
+                );
+              },
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (error, _) => Center(child: Text('讀取失敗：$error')),
+            ),
           ),
         ),
       ),

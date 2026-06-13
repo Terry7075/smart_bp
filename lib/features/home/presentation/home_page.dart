@@ -51,6 +51,10 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   String? _lastSnackTaskId;
 
+  void _returnToHome() {
+    ref.read(homeBottomNavIndexProvider.notifier).select(0);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -105,139 +109,165 @@ class _HomePageState extends ConsumerState<HomePage> {
     ColorScheme colorScheme,
     int navIndex,
   ) {
-    return Scaffold(
-      backgroundColor: colorScheme.surface,
-      appBar: AppBar(
-        backgroundColor: colorScheme.primary,
-        foregroundColor: colorScheme.onPrimary,
-        elevation: 0,
-        centerTitle: true,
-        title: Text(
-          '明德e達人',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: colorScheme.onPrimary,
-          ),
-        ),
-        actions: [
-          const _NotificationBellButton(),
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: PopupMenuButton<_AvatarMenu>(
-              tooltip: '個人選單',
-              offset: const Offset(0, 56),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              onSelected: (value) {
-                switch (value) {
-                  case _AvatarMenu.profile:
-                    context.push('/profile');
-                  case _AvatarMenu.logout:
-                    ref.read(authProvider.notifier).signOut();
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem<_AvatarMenu>(
-                  value: _AvatarMenu.profile,
-                  height: 56,
-                  child: Text(
-                    '個人資料',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-                  ),
-                ),
-                PopupMenuItem<_AvatarMenu>(
-                  value: _AvatarMenu.logout,
-                  height: 56,
-                  child: Row(
-                    children: [
-                      Icon(Icons.logout, color: Colors.red, size: 24),
-                      SizedBox(width: 12),
-                      Text(
-                        '登出',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.red,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              child: const _UserAvatar(),
+    return PopScope(
+      canPop: navIndex != 2,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && navIndex == 2) {
+          _returnToHome();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: colorScheme.surface,
+        appBar: AppBar(
+          backgroundColor: colorScheme.primary,
+          foregroundColor: colorScheme.onPrimary,
+          elevation: 0,
+          centerTitle: true,
+          leading: navIndex == 2
+              ? IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  tooltip: '返回首頁',
+                  onPressed: _returnToHome,
+                )
+              : null,
+          title: Text(
+            navIndex == 2 ? '社區交通' : '明德e達人',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: colorScheme.onPrimary,
             ),
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: navIndex == 3
-            ? const HealthPage()
-            : navIndex == 4
-                ? const ElderMonitoringTab()
-                : navIndex == 5
-                    ? const ElderActivitiesPage()
-                    : SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+          actions: [
+            const _NotificationBellButton(),
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: PopupMenuButton<_AvatarMenu>(
+                tooltip: '個人選單',
+                offset: const Offset(0, 56),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                onSelected: (value) {
+                  switch (value) {
+                    case _AvatarMenu.profile:
+                      context.push('/profile');
+                    case _AvatarMenu.logout:
+                      ref.read(authProvider.notifier).signOut();
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem<_AvatarMenu>(
+                    value: _AvatarMenu.profile,
+                    height: 56,
+                    child: Text(
+                      '個人資料',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  PopupMenuItem<_AvatarMenu>(
+                    value: _AvatarMenu.logout,
+                    height: 56,
+                    child: Row(
                       children: [
-                        const _GreetingCard(),
-                        const SizedBox(height: 20),
-                        const _ActionGrid(),
+                        Icon(Icons.logout, color: Colors.red, size: 24),
+                        SizedBox(width: 12),
+                        Text(
+                          '登出',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        currentIndex: navIndex,
-        onTap: (index) {
-          print('點擊了 ${_bottomNavLabels[index]}');
-          if (index == 1) {
-            context.push('/shop');
-            return;
-          }
-          ref.read(homeBottomNavIndexProvider.notifier).select(index);
-        },
-        backgroundColor: colorScheme.surface,
-        selectedItemColor: colorScheme.primary,
-        unselectedItemColor: colorScheme.onSurfaceVariant,
-        selectedFontSize: 20,
-        unselectedFontSize: 20,
-        iconSize: 28,
-        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
-        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: '首頁'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.storefront_outlined),
-            activeIcon: Icon(Icons.storefront),
-            label: '柑仔店',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.directions_bus_outlined),
-            activeIcon: Icon(Icons.directions_bus),
-            label: '交通',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.favorite_border),
-            activeIcon: Icon(Icons.favorite),
-            label: '健康',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.monitor_heart_outlined),
-            activeIcon: Icon(Icons.monitor_heart),
-            label: '監測',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.event_outlined),
-            activeIcon: Icon(Icons.event),
-            label: '活動',
-          ),
-        ],
+                ],
+                child: const _UserAvatar(),
+              ),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: navIndex == 2
+              ? const _TransportTab()
+              : navIndex == 3
+              ? const HealthPage()
+              : navIndex == 4
+              ? const ElderMonitoringTab()
+              : navIndex == 5
+              ? const ElderActivitiesPage()
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const _GreetingCard(),
+                      const SizedBox(height: 20),
+                      const _ActionGrid(),
+                    ],
+                  ),
+                ),
+        ),
+        bottomNavigationBar: BottomNavigationBar(
+          type: BottomNavigationBarType.fixed,
+          currentIndex: navIndex,
+          onTap: (index) {
+            print('點擊了 ${_bottomNavLabels[index]}');
+            if (index == 1) {
+              context.push('/shop');
+              return;
+            }
+            ref.read(homeBottomNavIndexProvider.notifier).select(index);
+          },
+          backgroundColor: colorScheme.surface,
+          selectedItemColor: colorScheme.primary,
+          unselectedItemColor: colorScheme.onSurfaceVariant,
+          selectedFontSize: 20,
+          unselectedFontSize: 20,
+          iconSize: 28,
+          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
+          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home_outlined),
+              activeIcon: Icon(Icons.home),
+              label: '首頁',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.storefront_outlined),
+              activeIcon: Icon(Icons.storefront),
+              label: '柑仔店',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.directions_bus_outlined),
+              activeIcon: Icon(Icons.directions_bus),
+              label: '交通',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.favorite_border),
+              activeIcon: Icon(Icons.favorite),
+              label: '健康',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.monitor_heart_outlined),
+              activeIcon: Icon(Icons.monitor_heart),
+              label: '監測',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.event_outlined),
+              activeIcon: Icon(Icons.event),
+              label: '活動',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -271,9 +301,7 @@ class _NotificationBellButton extends ConsumerWidget {
 
   void _openNotificationCenter(BuildContext context) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => const NotificationCenterPage(),
-      ),
+      MaterialPageRoute<void>(builder: (_) => const NotificationCenterPage()),
     );
   }
 }
@@ -284,10 +312,9 @@ class _UserAvatar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final onPrimary = Theme.of(context).colorScheme.onPrimary;
-    final char = ref.watch(profileProvider).maybeWhen(
-          data: (p) => p?.firstChar ?? '長',
-          orElse: () => '長',
-        );
+    final char = ref
+        .watch(profileProvider)
+        .maybeWhen(data: (p) => p?.firstChar ?? '長', orElse: () => '長');
 
     return Container(
       width: 48,
@@ -381,7 +408,10 @@ class _GreetingCard extends ConsumerWidget {
               const SizedBox(height: 16),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: colorScheme.onPrimary.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(12),
@@ -467,7 +497,6 @@ class _ActionGrid extends StatelessWidget {
 
   static const _learningBlue = Color(0xFF1565C0);
   static const _hakkaTeal = Color(0xFF00695C);
-  static const _transportGreen = Color(0xFF2E7D32);
 
   @override
   Widget build(BuildContext context) {
@@ -499,16 +528,28 @@ class _ActionGrid extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        _LargeMenuCard(
-          title: '社區交通',
-          subtitle: '預約接送、長期接送與司機任務',
-          icon: Icons.local_taxi_rounded,
-          iconBackground: _transportGreen.withValues(alpha: 0.12),
-          iconColor: _transportGreen,
-          onTap: () => context.push('/transport'),
-        ),
       ],
+    );
+  }
+}
+
+class _TransportTab extends StatelessWidget {
+  const _TransportTab();
+
+  static const _transportGreen = Color(0xFF2E7D32);
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: _LargeMenuCard(
+        title: '社區交通',
+        subtitle: '預約接送、長期接送與司機任務',
+        icon: Icons.local_taxi_rounded,
+        iconBackground: _transportGreen.withValues(alpha: 0.12),
+        iconColor: _transportGreen,
+        onTap: () => context.push('/transport'),
+      ),
     );
   }
 }
@@ -571,7 +612,9 @@ class _LargeMenuCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.85),
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.85),
                   height: 1.3,
                 ),
               ),
