@@ -7,6 +7,7 @@ import 'package:smart_bp/features/activities/volunteer_activities_manage.dart';
 import 'package:smart_bp/features/auth/auth_provider.dart';
 import 'package:smart_bp/features/auth/role_guard.dart';
 import 'package:smart_bp/features/health_monitoring/presentation/volunteer_monitoring_tab.dart';
+import 'package:smart_bp/features/medication/volunteer_drug_dictionary_add_page.dart';
 import 'package:smart_bp/features/volunteer/volunteer_content_manage.dart';
 import 'package:smart_bp/features/volunteer/volunteer_batch_refill_provider.dart';
 import 'package:smart_bp/features/volunteer/volunteer_batch_refill_tab.dart';
@@ -84,6 +85,11 @@ class _VolunteerDashboardState extends ConsumerState<VolunteerDashboard> {
                 icon: const Icon(Icons.refresh, size: 28),
                 onPressed: _refreshHealth,
               ),
+            IconButton(
+              tooltip: '交通管理',
+              icon: const Icon(Icons.local_taxi, size: 28),
+              onPressed: () => context.push('/transport'),
+            ),
             IconButton(
               tooltip: '個人資料',
               icon: const Icon(Icons.person_outline, size: 28),
@@ -229,7 +235,7 @@ class _VolunteerHealthSection extends ConsumerStatefulWidget {
 
   final Future<void> Function() onRefreshAll;
 
-  /// 0=藥單 1=批次代領 2=監測
+  /// 0=藥單 1=批次代領 2=監測 3=藥典
   final int initialTab;
 
   @override
@@ -244,8 +250,8 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
   @override
   void initState() {
     super.initState();
-    final tab = widget.initialTab.clamp(0, 2);
-    _tabController = TabController(length: 3, vsync: this, initialIndex: tab);
+    final tab = widget.initialTab.clamp(0, 3);
+    _tabController = TabController(length: 4, vsync: this, initialIndex: tab);
   }
 
   @override
@@ -277,10 +283,13 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
+            isScrollable: true,
+            tabAlignment: TabAlignment.center,
             tabs: const [
               Tab(text: '藥單協助'),
               Tab(text: '🛵 批次代領'),
               Tab(text: '❤️ 長者監測'),
+              Tab(text: '📖 新增藥典'),
             ],
           ),
         ),
@@ -309,6 +318,7 @@ class _VolunteerHealthSectionState extends ConsumerState<_VolunteerHealthSection
                 child: const VolunteerBatchRefillTab(),
               ),
               const VolunteerMonitoringTab(),
+              const VolunteerDrugDictionaryAddPage(),
             ],
           ),
         ),

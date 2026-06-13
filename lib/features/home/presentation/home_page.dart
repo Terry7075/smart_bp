@@ -467,32 +467,46 @@ class _ActionGrid extends StatelessWidget {
 
   static const _learningBlue = Color(0xFF1565C0);
   static const _hakkaTeal = Color(0xFF00695C);
+  static const _transportGreen = Color(0xFF2E7D32);
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
       children: [
-        Expanded(
-          child: _LargeMenuCard(
-            title: '社區學習',
-            subtitle: '防詐宣導與健康教室',
-            icon: Icons.menu_book_rounded,
-            iconBackground: _learningBlue.withValues(alpha: 0.12),
-            iconColor: _learningBlue,
-            onTap: () => context.push('/community-learning'),
-          ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _LargeMenuCard(
+                title: '社區學習',
+                subtitle: '防詐宣導與健康教室',
+                icon: Icons.menu_book_rounded,
+                iconBackground: _learningBlue.withValues(alpha: 0.12),
+                iconColor: _learningBlue,
+                onTap: () => context.push('/community-learning'),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: _LargeMenuCard(
+                title: '🗣️ 客語資訊',
+                subtitle: '生活客語、歌謠與在地故事',
+                icon: Icons.record_voice_over_rounded,
+                iconBackground: _hakkaTeal.withValues(alpha: 0.12),
+                iconColor: _hakkaTeal,
+                onTap: () => context.push('/hakka-culture'),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: _LargeMenuCard(
-            title: '🗣️ 客語資訊',
-            subtitle: '生活客語、歌謠與在地故事',
-            icon: Icons.record_voice_over_rounded,
-            iconBackground: _hakkaTeal.withValues(alpha: 0.12),
-            iconColor: _hakkaTeal,
-            onTap: () => context.push('/hakka-culture'),
-          ),
+        const SizedBox(height: 16),
+        _LargeMenuCard(
+          title: '社區交通',
+          subtitle: '預約接送、長期接送與司機任務',
+          icon: Icons.local_taxi_rounded,
+          iconBackground: _transportGreen.withValues(alpha: 0.12),
+          iconColor: _transportGreen,
+          onTap: () => context.push('/transport'),
         ),
       ],
     );

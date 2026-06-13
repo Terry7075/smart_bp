@@ -23,6 +23,7 @@ import 'package:smart_bp/features/shop/presentation/shop_price_page.dart';
 import 'package:smart_bp/features/volunteer/volunteer_content_manage.dart';
 import 'package:smart_bp/features/volunteer/volunteer_dashboard.dart';
 import 'package:smart_bp/features/volunteer/volunteer_shop_orders_page.dart';
+import 'package:smart_bp/features/transport/transport_routes.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// 綁定 Supabase `auth.onAuthStateChange`，登入／登出時通知 [GoRouter] 重跑 [GoRouter.redirect]。
@@ -187,6 +188,8 @@ GoRouter get appRouter =>
             );
           },
         ),
+        // 社區交通模組（/transport 前綴，依角色分流）
+        ...buildTransportRoutes(),
       ],
     );
 
@@ -229,6 +232,7 @@ class _RoleDecisionPageState extends ConsumerState<_RoleDecisionPage> {
       Profile.kRoleVolunteer => '/volunteer-dashboard',
       Profile.kRoleFamily => '/family/home',
       Profile.kRoleAdmin => '/volunteer-dashboard?tab=3',
+      Profile.kRoleDriver => '/transport',
       _ => '/home',
     };
 
